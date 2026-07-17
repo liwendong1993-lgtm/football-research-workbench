@@ -35,6 +35,14 @@
     return groups;
   }
 
+  function enforceSingleMarketPerMatch(items){
+    const family=market=>market==='spf'||market==='hhad'?'result':market;
+    return normalizeComboItems(items).map(item=>{
+      const selectedFamily=family(item.options[0]?.market);
+      return {...item,options:item.options.filter(option=>family(option.market)===selectedFamily)};
+    }).filter(item=>item.options.length);
+  }
+
   function optionWins(option,homeGoals,awayGoals){
     if(!(Number(option.odd)>0)) return false;
     const result=homeGoals>awayGoals?'h':homeGoals===awayGoals?'d':'a';
@@ -90,5 +98,5 @@
     return {legs:groups.length,tickets,minOdd,maxOdd,complete};
   }
 
-  return {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,comboMetrics,schemePrizeRange};
+  return {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange};
 });
