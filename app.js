@@ -1,10 +1,12 @@
 const API_BASE='https://webapi.sporttery.cn/gateway/uniform/football/getMatchCalculatorV1.qry?channel=c&poolCode=';
 const STORE_KEY='football-workbench-v1';
 const {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,comboMetrics,schemePrizeRange}=ComboUtils;
+const {formatScanRow}=ScanUtils;
 const DEFAULT_STATE={matches:[],drafts:{},combos:{},reports:[],activeDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:''};
 let state=loadState();
 let activeFilter='all';
 let editingId=null;
+let posterMode='detail';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -143,7 +145,27 @@ function renderHistory(){
 }
 
 function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let line='';for(const c of chars){if(ctx.measureText(line+c).width>maxWidth&&line){lines.push(line);line=c}else line+=c}if(line)lines.push(line);return lines}
+function drawFitText(ctx,text,x,y,maxWidth,startSize=24,minSize=14,weight=700){let size=startSize;do{ctx.font=`${weight} ${size}px sans-serif`;if(ctx.measureText(String(text)).width<=maxWidth)break;size-=1}while(size>minSize);ctx.fillText(String(text),x,y)}
+function drawScanPoster(){
+  const matches=state.matches.filter(m=>m.businessDate===state.activeDate).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  if(!matches.length){toast('当前日期没有比赛');return false}
+  const rows=matches.map(m=>formatScanRow(m,draftFor(m.id))),edited=rows.filter(r=>r.edited).length;
+  const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d'),width=1200,rowH=104,tableY=390,height=tableY+62+rows.length*rowH+240;
+  canvas.width=width;canvas.height=height;
+  const bg=ctx.createLinearGradient(0,0,0,height);bg.addColorStop(0,'#061528');bg.addColorStop(.32,'#092a36');bg.addColorStop(1,'#053224');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
+  ctx.save();ctx.globalAlpha=.12;ctx.strokeStyle='#79d8ff';ctx.lineWidth=3;for(let i=-300;i<1500;i+=170){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i+440,350);ctx.stroke()}ctx.beginPath();ctx.arc(930,125,150,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(930,125,86,0,Math.PI*2);ctx.stroke();ctx.restore();
+  ctx.fillStyle='#ff6f3d';ctx.font='900 58px sans-serif';ctx.fillText('今日足球',42,88);ctx.fillStyle='#f6c851';ctx.font='700 28px sans-serif';ctx.fillText(`${fmtDate(state.activeDate)} ${weekday(state.activeDate)}`,850,78);
+  ctx.fillStyle='#fff';ctx.font='900 78px sans-serif';ctx.fillText('全部扫盘推荐',42,190);ctx.fillStyle='#7ed6ff';ctx.font='800 30px sans-serif';ctx.fillText('综合研究一览',46,242);
+  ctx.fillStyle='rgba(255,255,255,.08)';roundRect(ctx,42,278,1116,70,18);ctx.fillStyle='#dce9f6';ctx.font='700 24px sans-serif';ctx.fillText(state.settings.author||'足球研究员',68,322);ctx.textAlign='right';ctx.fillStyle=edited===rows.length?'#67e2ae':'#f6c851';ctx.fillText(`已研究 ${edited} / 共 ${rows.length} 场`,1130,322);ctx.textAlign='left';
+  const cols=[{x:42,w:72,l:'编号'},{x:114,w:92,l:'时间'},{x:206,w:100,l:'赛事'},{x:306,w:282,l:'主队 VS 客队'},{x:588,w:120,l:'胜平负'},{x:708,w:160,l:'让球'},{x:868,w:132,l:'总进球'},{x:1000,w:158,l:'比分'}];
+  ctx.fillStyle='#081725';ctx.fillRect(30,tableY,1140,62);ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=1;cols.forEach(c=>{ctx.fillStyle='#fff';ctx.textAlign='center';drawFitText(ctx,c.l,c.x+c.w/2,tableY+39,c.w-10,25,14,800);ctx.beginPath();ctx.moveTo(c.x+c.w,tableY);ctx.lineTo(c.x+c.w,tableY+62+rows.length*rowH);ctx.stroke()});ctx.textAlign='left';
+  rows.forEach((r,i)=>{const y=tableY+62+i*rowH;ctx.fillStyle=i%2?'rgba(6,65,46,.9)':'rgba(5,77,53,.82)';ctx.fillRect(30,y,1140,rowH-2);if(r.confidence==='主推'){ctx.fillStyle='#f6c851';ctx.fillRect(30,y,7,rowH-2)}if(!r.edited){ctx.fillStyle='rgba(5,15,25,.52)';ctx.fillRect(30,y,1140,rowH-2)}const values=[r.num,r.time,r.league,r.teams,r.result,r.handicap,r.goals,r.scores];cols.forEach((c,j)=>{ctx.fillStyle=r.edited?(j===0?'#f6c851':'#f3d6b3'):'#8293a6';ctx.textAlign=j===3?'left':'center';const x=j===3?c.x+12:c.x+c.w/2;drawFitText(ctx,values[j],x,y+61,c.w-(j===3?22:10),j===3?25:23,13,j===0?900:700)});ctx.textAlign='left'});
+  const footerY=tableY+62+rows.length*rowH+46;ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(42,footerY-14);ctx.lineTo(1158,footerY-14);ctx.stroke();ctx.fillStyle='#fff';ctx.font='italic 900 38px sans-serif';ctx.fillText('看赛事 · 做记录 · 理性研究',42,footerY+45);ctx.fillStyle='#9fb8b0';ctx.font='22px sans-serif';wrapText(ctx,state.settings.disclaimer,1080).slice(0,2).forEach((line,i)=>ctx.fillText(line,42,footerY+92+i*30));ctx.fillStyle='#f6c851';ctx.font='700 19px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,42,height-34);
+  return true;
+}
+function showScanPoster(){posterMode='scan';if(!drawScanPoster())return;$('#posterDialog .modal-head h3').textContent='全部扫盘图预览';$('#posterDialog').showModal()}
 function drawPoster(report){
+  posterMode='detail';$('#posterDialog .modal-head h3').textContent='详细研究长图预览';
   const date=report?.date||state.activeDate,matches=report?.matches||selectedMatches(),drafts=report?.drafts||state.drafts,combos=report?.combos||state.combos[date]||[];
   const rows=matches.map(m=>{const d=drafts[m.id]||draftFor(m.id);let parts=[];if(d.spf?.length)parts.push(`胜平负 ${d.spf.map(x=>pickLabel('spf',x)).join('/')}`);if(d.hhad?.length)parts.push(`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`);if(d.goals?.length)parts.push(`进球 ${d.goals.join('/')}`);if(d.scores)parts.push(`比分 ${d.scores}`);return {m,d,parts}});
   const height=480+rows.reduce((n,r)=>n+180+(r.d.note?70:0),0)+combos.length*200+180;
@@ -156,14 +178,14 @@ function drawPoster(report){
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
 function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');return}drawPoster();$('#posterDialog').showModal()}
-function downloadPoster(){const a=document.createElement('a');a.download=`足球研究-${state.activeDate}.png`;a.href=$('#posterCanvas').toDataURL('image/png');a.click();toast('图片已生成')}
+function downloadPoster(){const a=document.createElement('a');a.download=`${posterMode==='scan'?'全部扫盘':'足球研究'}-${state.activeDate}.png`;a.href=$('#posterCanvas').toDataURL('image/png');a.click();toast('图片已生成')}
 
 function renderSettings(){$('#authorInput').value=state.settings.author||'';$('#disclaimerInput').value=state.settings.disclaimer||''}
 function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`足球研究工作台备份-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);toast('备份已导出')}
 async function importData(file){try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.matches))throw new Error('格式不正确');state={...structuredClone(DEFAULT_STATE),...data};saveState();renderAll();toast('备份导入成功')}catch{toast('导入失败：文件格式不正确')}}
 
 function bind(){
-  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=()=>$('#posterDialog').close();$('#downloadPosterBtn').onclick=downloadPoster;
+  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=()=>$('#posterDialog').close();$('#downloadPosterBtn').onclick=downloadPoster;
   $('#dateStrip').onclick=e=>{const b=e.target.closest('[data-date]');if(b){state.activeDate=b.dataset.date;saveState();renderAll()}};
   $('#filterBar').onclick=e=>{const b=e.target.closest('[data-filter]');if(b){activeFilter=b.dataset.filter;$$('#filterBar button').forEach(x=>x.classList.toggle('active',x===b));renderMatches()}};
   $$('.bottom-nav button').forEach(b=>b.onclick=()=>{$$('.bottom-nav button').forEach(x=>x.classList.toggle('active',x===b));$$('.page').forEach(p=>p.classList.toggle('active',p.id===b.dataset.page));if(b.dataset.page==='plansPage')renderCombos()});

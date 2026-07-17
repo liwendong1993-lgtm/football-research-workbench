@@ -54,7 +54,8 @@
         <div class="publish-panel">
           <h3>发布预览</h3>
           <p>生成图片前会保存当前赔率和编辑时间。图片仅用于展示个人足球研究观点。</p>
-          <button class="primary full" id="posterBtn">生成微信长图</button>
+          <button class="primary full" id="scanPosterBtn">生成全部扫盘图</button>
+          <button class="secondary full" id="posterBtn">生成详细研究长图</button>
           <button class="secondary full" id="saveReportBtn">保存到历史记录</button>
         </div>
       </section>
@@ -101,6 +102,7 @@
   <dialog id="posterDialog" class="poster-dialog"><div class="poster-modal"><div class="modal-head"><h3>微信长图预览</h3><button id="closePosterBtn" class="icon-btn">×</button></div><canvas id="posterCanvas"></canvas><button id="downloadPosterBtn" class="primary full">保存PNG图片</button></div></dialog>
   <div class="toast" id="toast"></div>
   <script src="combo-utils.js"></script>
+  <script src="scan-utils.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
