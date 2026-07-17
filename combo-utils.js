@@ -8,12 +8,20 @@
     return String(value||'').split(/[、,，/\s]+/).map(x=>x.trim()).filter(x=>x&&!seen.has(x)&&seen.add(x));
   }
 
+  const FIXED_SCORES=new Set(['0:0','1:0','2:0','2:1','3:0','3:1','3:2','4:0','4:1','4:2','5:0','5:1','5:2','1:1','2:2','3:3','0:1','0:2','1:2','0:3','1:3','2:3','0:4','1:4','2:4','0:5','1:5','2:5']);
+  function scoreOddsLabel(score){
+    const m=String(score||'').match(/^(\d+):(\d+)$/);if(!m||FIXED_SCORES.has(`${Number(m[1])}:${Number(m[2])}`))return '';
+    const home=Number(m[1]),away=Number(m[2]);return home>away?'胜其他':home===away?'平其他':'负其他';
+  }
+
   function crsKeyForScore(score){
     const special={'胜其他':'s1sh','平其他':'s1sd','负其他':'s1sa'};
     if(special[score]) return special[score];
     const m=String(score||'').match(/^(\d+):(\d+)$/);
     if(!m) return '';
-    return `s${m[1].padStart(2,'0')}s${m[2].padStart(2,'0')}`;
+    const normalized=`${Number(m[1])}:${Number(m[2])}`,fallback=scoreOddsLabel(normalized);
+    if(fallback)return special[fallback];
+    return `s${String(Number(m[1])).padStart(2,'0')}s${String(Number(m[2])).padStart(2,'0')}`;
   }
 
   function splitOptionValue(value){
@@ -38,8 +46,9 @@
   function enforceSingleMarketPerMatch(items){
     const family=market=>market==='spf'||market==='hhad'?'result':market;
     return normalizeComboItems(items).map(item=>{
-      const selectedFamily=family(item.options[0]?.market);
-      return {...item,options:item.options.filter(option=>family(option.market)===selectedFamily)};
+      const selectedFamily=family(item.options[0]?.market),seen=new Set();
+      const options=item.options.filter(option=>family(option.market)===selectedFamily).filter(option=>{const key=option.market==='scores'?`scores:${crsKeyForScore(option.pick)}`:`${option.market}:${option.pick}`;if(seen.has(key))return false;seen.add(key);return true});
+      return {...item,options};
     }).filter(item=>item.options.length);
   }
 
@@ -53,12 +62,9 @@
     }
     if(option.market==='goals') return option.pick==='7+'?homeGoals+awayGoals>=7:String(homeGoals+awayGoals)===String(option.pick);
     if(option.market==='scores'){
-      if(/^\d+:\d+$/.test(option.pick)) return option.pick===`${homeGoals}:${awayGoals}`;
-      const standardHome=new Set(['1:0','2:0','2:1','3:0','3:1','3:2','4:0','4:1','4:2','5:0','5:1','5:2']);
-      const standardDraw=new Set(['0:0','1:1','2:2','3:3']);
-      const standardAway=new Set(['0:1','0:2','1:2','0:3','1:3','2:3','0:4','1:4','2:4','0:5','1:5','2:5']);
-      const score=`${homeGoals}:${awayGoals}`;
-      return (option.pick==='胜其他'&&result==='h'&&!standardHome.has(score))||(option.pick==='平其他'&&result==='d'&&!standardDraw.has(score))||(option.pick==='负其他'&&result==='a'&&!standardAway.has(score));
+      const actual=`${homeGoals}:${awayGoals}`,target=scoreOddsLabel(option.pick)||option.pick;
+      if(['胜其他','平其他','负其他'].includes(target))return scoreOddsLabel(actual)===target;
+      return target===actual;
     }
     return false;
   }
@@ -98,5 +104,5 @@
     return {legs:groups.length,tickets,minOdd,maxOdd,complete};
   }
 
-  return {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange};
+  return {parseScorePicks,crsKeyForScore,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange};
 });

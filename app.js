@@ -1,6 +1,6 @@
 const API_BASE='https://webapi.sporttery.cn/gateway/uniform/football/getMatchCalculatorV1.qry?channel=c&poolCode=';
 const STORE_KEY='football-workbench-v1';
-const {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange}=ComboUtils;
+const {parseScorePicks,crsKeyForScore,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange}=ComboUtils;
 const {formatScanRow}=ScanUtils;
 const DEFAULT_STATE={matches:[],drafts:{},combos:{},reports:[],activeDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:''};
 let state=loadState();
@@ -88,21 +88,26 @@ function matchCard(m){
 }
 
 function toggleArr(arr,val){return arr.includes(val)?arr.filter(x=>x!==val):[...arr,val]}
+function scoreOddMeta(match,score){const category=scoreOddsLabel(score),key=crsKeyForScore(score),odd=Number(match?.crs?.[key])||0;return {category,key,odd}}
+function scorePickHtml(match,score){const meta=scoreOddMeta(match,score),binding=meta.category?`<small>自动绑定 ${esc(meta.category)}</small>`:'<small>固定比分</small>';return `<div class="score-pick-item"><div><strong>${esc(score)}</strong>${binding}</div><span class="score-odd">赔率 ${meta.odd?meta.odd.toFixed(2):'--'}</span><button type="button" data-remove-score="${esc(score)}" aria-label="删除比分">×</button></div>`}
 function pickButtons(market,items,selected){return items.map(([v,label,odd])=>`<button type="button" class="pick-btn ${selected.includes(v)?'selected':''}" data-market="${market}" data-value="${v}">${label}${odd?`<em>${odd}</em>`:''}</button>`).join('')}
 function openEdit(id){
-  editingId=id;const m=state.matches.find(x=>x.id===id),d=structuredClone(draftFor(id));
+  editingId=id;const m=state.matches.find(x=>x.id===id),d=structuredClone(draftFor(id)),scorePoolKeys=new Set();let scorePicks=parseScorePicks(d.scores).filter(score=>{const key=crsKeyForScore(score);if(scorePoolKeys.has(key))return false;scorePoolKeys.add(key);return true});
   $('#editContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">${esc(m.league)} · ${esc(m.num)}</p><h2>${esc(m.home)} vs ${esc(m.away)}</h2></div><button value="cancel">×</button></div>
   <div class="pick-group"><h4>胜平负</h4><div class="pick-grid">${pickButtons('spf',[['h','胜',m.had?.h],['d','平',m.had?.d],['a','负',m.had?.a]],d.spf)}</div></div>
   <div class="pick-group"><h4>让球胜平负 <span class="match-no">${esc(m.hhad?.goalLine||'')}</span></h4><div class="pick-grid">${pickButtons('hhad',[['h','让胜',m.hhad?.h],['d','让平',m.hhad?.d],['a','让负',m.hhad?.a]],d.hhad)}</div></div>
-  <div class="pick-group"><h4>进球数</h4><div class="pick-grid goals">${pickButtons('goals',['0','1','2','3','4','5','6','7+'].map(x=>[x,x,'']),d.goals)}</div></div>
+  <div class="pick-group"><h4>进球数</h4><div class="pick-grid goals">${pickButtons('goals',['0','1','2','3','4','5','6','7+'].map(x=>[x,x,m.ttg?.[`s${x==='7+'?'7':x}`]]),d.goals)}</div></div>
+  <div class="pick-group score-group"><h4>比分</h4><p class="section-note">输入主队和客队进球数，冒号固定；可添加多个比分。</p><div class="score-builder"><input id="scoreHomeInput" type="number" inputmode="numeric" min="0" max="99" placeholder="主"><span>:</span><input id="scoreAwayInput" type="number" inputmode="numeric" min="0" max="99" placeholder="客"><button type="button" id="addScoreBtn">添加</button></div><div id="scorePicksList" class="score-picks-list"></div></div>
   <div class="pick-group"><h4>信心标签</h4><div class="confidence-grid">${['主推','次选','冷门','风险','放弃'].map(x=>`<button type="button" class="pick-btn ${d.confidence===x?'selected':''}" data-confidence="${x}">${x}</button>`).join('')}</div></div>
-  <label>比分参考<input class="field-input" id="scoreInput" value="${esc(d.scores)}" placeholder="例如：2:1、1:1、2:0" /></label>
   <label>分析理由<textarea class="field-input" id="noteInput" rows="4" placeholder="记录信息、赔率变化和判断理由">${esc(d.note)}</textarea></label>
   <button type="button" class="primary full" id="saveDraftBtn">保存本场研究</button>`;
   const dlg=$('#editDialog');dlg.showModal();
+  const renderScorePicks=()=>{$('#scorePicksList').innerHTML=scorePicks.length?scorePicks.map(score=>scorePickHtml(m,score)).join(''):'<div class="score-empty">尚未添加比分</div>'};
+  const addScore=()=>{const home=$('#scoreHomeInput').value,away=$('#scoreAwayInput').value;if(!/^\d+$/.test(home)||!/^\d+$/.test(away)){toast('请填写主队和客队进球数');return}const score=`${Number(home)}:${Number(away)}`,samePool=scorePicks.find(x=>crsKeyForScore(x)===crsKeyForScore(score));if(samePool){toast(samePool===score?'这个比分已经添加':`已添加同一赔率项：${scoreOddsLabel(score)}`);return}scorePicks.push(score);$('#scoreHomeInput').value='';$('#scoreAwayInput').value='';renderScorePicks();$('#scoreHomeInput').focus()};
+  renderScorePicks();$('#addScoreBtn').onclick=addScore;$('#scorePicksList').onclick=e=>{const btn=e.target.closest('[data-remove-score]');if(btn){scorePicks=scorePicks.filter(x=>x!==btn.dataset.removeScore);renderScorePicks()}};[$('#scoreHomeInput'),$('#scoreAwayInput')].forEach(input=>input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addScore()}});
   $$('#editContent .pick-btn[data-market]').forEach(btn=>btn.onclick=()=>{d[btn.dataset.market]=toggleArr(d[btn.dataset.market],btn.dataset.value);btn.classList.toggle('selected')});
   $$('#editContent [data-confidence]').forEach(btn=>btn.onclick=()=>{d.confidence=d.confidence===btn.dataset.confidence?'':btn.dataset.confidence;$$('#editContent [data-confidence]').forEach(b=>b.classList.toggle('selected',b.dataset.confidence===d.confidence))});
-  $('#saveDraftBtn').onclick=()=>{d.scores=$('#scoreInput').value.trim();d.note=$('#noteInput').value.trim();state.drafts[id]=d;saveState();dlg.close();renderAll();toast('已保存本场研究')};
+  $('#saveDraftBtn').onclick=()=>{d.scores=scorePicks.join('、');d.note=$('#noteInput').value.trim();state.drafts[id]=d;saveState();dlg.close();renderAll();toast('已保存本场研究')};
 }
 
 function availableOptions(m,d){
@@ -110,7 +115,7 @@ function availableOptions(m,d){
   d.spf.forEach(p=>opts.push({market:'spf',pick:p,label:`${pickLabel('spf',p)} ${m.had?.[p]||'--'}`,odd:oddFor(m,'had',p)}));
   d.hhad.forEach(p=>opts.push({market:'hhad',pick:p,goalLine:Number(m.hhad?.goalLine)||0,label:`${m.hhad?.goalLine||'让球'} ${pickLabel('hhad',p)} ${m.hhad?.[p]||'--'}`,odd:oddFor(m,'hhad',p)}));
   d.goals.forEach(p=>{const key=`s${p==='7+'?'7':p}`,odd=Number(m.ttg?.[key])||0;opts.push({market:'goals',pick:p,label:`进球${p} ${odd||'--'}`,odd})});
-  parseScorePicks(d.scores).forEach(p=>{const odd=Number(m.crs?.[crsKeyForScore(p)])||0;opts.push({market:'scores',pick:p,label:`比分${p} ${odd||'--'}`,odd})});
+  const scoreKeys=new Set();parseScorePicks(d.scores).forEach(p=>{const key=crsKeyForScore(p);if(scoreKeys.has(key))return;scoreKeys.add(key);const odd=Number(m.crs?.[key])||0,category=scoreOddsLabel(p);opts.push({market:'scores',pick:p,label:`比分${p}${category?`（${category}）`:''} ${odd||'--'}`,odd})});
   return opts;
 }
 function optionText(label){return String(label||'').replace(/\s+(?:\d+(?:\.\d+)?|--)$/,'')}
