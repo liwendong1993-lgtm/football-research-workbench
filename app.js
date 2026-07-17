@@ -7,13 +7,15 @@ let state=loadState();
 let activeFilter='all';
 let editingId=null;
 let posterMode='detail';
+let posterObjectUrl='';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function deepClone(value){return typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value))}
 
-function loadState(){try{return {...structuredClone(DEFAULT_STATE),...JSON.parse(localStorage.getItem(STORE_KEY)||'{}')}}catch{return structuredClone(DEFAULT_STATE)}}
+function loadState(){try{return {...deepClone(DEFAULT_STATE),...JSON.parse(localStorage.getItem(STORE_KEY)||'{}')}}catch{return deepClone(DEFAULT_STATE)}}
 function saveState(){localStorage.setItem(STORE_KEY,JSON.stringify(state))}
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),2200)}
 function weekday(date){return ['周日','周一','周二','周三','周四','周五','周六'][new Date(date+'T12:00:00').getDay()]}
@@ -92,7 +94,7 @@ function scoreOddMeta(match,score){const category=scoreOddsLabel(score),key=crsK
 function scorePickHtml(match,score){const meta=scoreOddMeta(match,score),binding=meta.category?`<small>自动绑定 ${esc(meta.category)}</small>`:'<small>固定比分</small>';return `<div class="score-pick-item"><div><strong>${esc(score)}</strong>${binding}</div><span class="score-odd">赔率 ${meta.odd?meta.odd.toFixed(2):'--'}</span><button type="button" data-remove-score="${esc(score)}" aria-label="删除比分">×</button></div>`}
 function pickButtons(market,items,selected){return items.map(([v,label,odd])=>`<button type="button" class="pick-btn ${selected.includes(v)?'selected':''}" data-market="${market}" data-value="${v}">${label}${odd?`<em>${odd}</em>`:''}</button>`).join('')}
 function openEdit(id){
-  editingId=id;const m=state.matches.find(x=>x.id===id),d=structuredClone(draftFor(id)),scorePoolKeys=new Set();let scorePicks=parseScorePicks(d.scores).filter(score=>{const key=crsKeyForScore(score);if(scorePoolKeys.has(key))return false;scorePoolKeys.add(key);return true});
+  editingId=id;const m=state.matches.find(x=>x.id===id),d=deepClone(draftFor(id)),scorePoolKeys=new Set();let scorePicks=parseScorePicks(d.scores).filter(score=>{const key=crsKeyForScore(score);if(scorePoolKeys.has(key))return false;scorePoolKeys.add(key);return true});
   $('#editContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">${esc(m.league)} · ${esc(m.num)}</p><h2>${esc(m.home)} vs ${esc(m.away)}</h2></div><button value="cancel">×</button></div>
   <div class="pick-group"><h4>胜平负</h4><div class="pick-grid">${pickButtons('spf',[['h','胜',m.had?.h],['d','平',m.had?.d],['a','负',m.had?.a]],d.spf)}</div></div>
   <div class="pick-group"><h4>让球胜平负 <span class="match-no">${esc(m.hhad?.goalLine||'')}</span></h4><div class="pick-grid">${pickButtons('hhad',[['h','让胜',m.hhad?.h],['d','让平',m.hhad?.d],['a','让负',m.hhad?.a]],d.hhad)}</div></div>
@@ -147,15 +149,20 @@ function openManual(){
 
 function saveReport(){
   const matches=selectedMatches();if(!matches.length){toast('当前日期还没有研究内容');return}
-  const report={id:uid(),date:state.activeDate,createdAt:new Date().toISOString(),matches:structuredClone(matches),drafts:Object.fromEntries(matches.map(m=>[m.id,structuredClone(draftFor(m.id))])),combos:structuredClone(state.combos[state.activeDate]||[])};
+  const report={id:uid(),date:state.activeDate,createdAt:new Date().toISOString(),matches:deepClone(matches),drafts:Object.fromEntries(matches.map(m=>[m.id,deepClone(draftFor(m.id))])),combos:deepClone(state.combos[state.activeDate]||[])};
   state.reports=state.reports.filter(r=>r.date!==state.activeDate);state.reports.unshift(report);saveState();renderHistory();toast('已保存到历史记录');
 }
 function renderHistory(){
   $('#historyList').innerHTML=state.reports.length?state.reports.map(r=>`<article class="history-card"><div><p class="eyebrow">${weekday(r.date)} · ${fmtDate(r.date)}</p><h3>${r.matches.length}场研究 · ${r.combos.length}个方案</h3><span class="combo-meta">发布 ${new Date(r.createdAt).toLocaleString('zh-CN')}</span></div><button data-history-poster="${r.id}">生成图片</button></article>`).join(''):'<div class="empty">还没有历史报告<br>在“方案”页保存后会出现在这里</div>';
-  $$('[data-history-poster]').forEach(b=>b.onclick=()=>{const r=state.reports.find(x=>x.id===b.dataset.historyPoster);drawPoster(r);$('#posterDialog').showModal()});
+  $$('[data-history-poster]').forEach(b=>b.onclick=()=>{const r=state.reports.find(x=>x.id===b.dataset.historyPoster);drawPoster(r);showPosterDialog('历史研究长图预览')});
 }
 
 function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let line='';for(const c of chars){if(ctx.measureText(line+c).width>maxWidth&&line){lines.push(line);line=c}else line+=c}if(line)lines.push(line);return lines}
+function posterPrefix(){return posterMode==='scan'?'全部扫盘':posterMode==='combo'?'单条方案':'足球研究'}
+function posterFilename(){return `${posterPrefix()}-${state.activeDate}.png`}
+function canvasToBlob(){const canvas=$('#posterCanvas');return new Promise((resolve,reject)=>{if(typeof canvas.toBlob==='function')canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('图片转换失败')),'image/png');else try{const data=atob(canvas.toDataURL('image/png').split(',')[1]),bytes=new Uint8Array(data.length);for(let i=0;i<data.length;i++)bytes[i]=data.charCodeAt(i);resolve(new Blob([bytes],{type:'image/png'}))}catch(error){reject(error)}})}
+async function refreshPosterPreview(){try{const blob=await canvasToBlob();if(posterObjectUrl)URL.revokeObjectURL(posterObjectUrl);posterObjectUrl=URL.createObjectURL(blob);$('#posterImage').src=posterObjectUrl}catch(error){console.error('生成图片预览失败',error);$('#posterSaveStatus').textContent='图片预览生成失败，请重新生成';$('#posterSaveStatus').className='poster-save-status error'}}
+function showPosterDialog(title){$('#posterDialog .modal-head h3').textContent=title;$('#posterSaveStatus').textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';$('#posterSaveStatus').className='poster-save-status';const dlg=$('#posterDialog');if(!dlg.open)dlg.showModal();refreshPosterPreview()}
 function drawFitText(ctx,text,x,y,maxWidth,startSize=24,minSize=14,weight=700){let size=startSize;do{ctx.font=`${weight} ${size}px sans-serif`;if(ctx.measureText(String(text)).width<=maxWidth)break;size-=1}while(size>minSize);ctx.fillText(String(text),x,y)}
 function comboPosterGroups(item,match){
   const order=['spf','hhad','goals','scores'];
@@ -177,7 +184,7 @@ function drawSingleComboPoster(combo){
   let y=430;rows.forEach(({item,match,groups,height:rowH})=>{ctx.fillStyle='#fff';ctx.fillRect(0,y,width,rowH-3);ctx.strokeStyle='#e5e7eb';ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();ctx.fillStyle='#3192bd';roundRect(ctx,38,y+28,132,52,7);ctx.fillStyle='#fff';ctx.font='900 30px sans-serif';ctx.textAlign='center';ctx.fillText(String(item.num||'').replace(/\D/g,'').slice(-3)||item.num,104,y+64);ctx.fillStyle='#7b818a';ctx.font='22px sans-serif';ctx.fillText(match.league||'足球',104,y+108);ctx.textAlign='left';ctx.fillStyle='#25282d';ctx.font='800 31px sans-serif';drawFitText(ctx,`${item.home}  VS  ${item.away}`,210,y+48,815,31,20,800);ctx.fillStyle='#8a9098';ctx.font='22px sans-serif';ctx.fillText(`${match.time||''}  ·  ${itemMarketLabel(item)}`,210,y+82);let groupY=y+100;groups.forEach(group=>{const gap=8,totalW=755,boxW=(totalW-gap*(group.cols-1))/group.cols,badgeColor=group.market==='spf'?'#cfd2d5':group.market==='hhad'?(Number(group.lineLabel)>0?'#70c978':'#ef8a8d'):'#3192bd';ctx.fillStyle=badgeColor;ctx.beginPath();ctx.roundRect(210,groupY,58,58,29);ctx.fill();ctx.fillStyle='#fff';ctx.font='900 19px sans-serif';ctx.textAlign='center';drawFitText(ctx,group.lineLabel,239,groupY+37,48,19,12,900);group.options.forEach((o,i)=>{const row=Math.floor(i/group.cols),col=i%group.cols,x=278+col*(boxW+gap),oy=groupY+row*72;ctx.fillStyle=o.selected?'#d80e19':'#f7f7f7';ctx.strokeStyle=o.selected?'#d80e19':'#d8dadd';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,oy,boxW,58,5);ctx.fill();ctx.stroke();ctx.fillStyle=o.selected?'#fff':'#42464c';ctx.font='800 24px sans-serif';const odd=o.odd>0?o.odd.toFixed(2):'--';drawFitText(ctx,`${o.label}  ${odd}`,x+boxW/2,oy+38,boxW-14,24,16,800)});ctx.textAlign='left';groupY+=group.lines*72});y+=rowH});
   ctx.fillStyle='#fff3e8';ctx.fillRect(0,y,width,height-y);ctx.fillStyle='#6f6259';ctx.font='23px sans-serif';wrapText(ctx,state.settings.disclaimer,980).slice(0,3).forEach((line,i)=>ctx.fillText(line,48,y+56+i*34));ctx.fillStyle='#b90f1c';ctx.font='800 22px sans-serif';ctx.fillText('胜平负与让球可同场组合 · 进球数/比分独立 · 请理性研究',48,height-40);return true
 }
-function showSingleComboPoster(combo){posterMode='combo';if(!drawSingleComboPoster(combo))return;$('#posterDialog .modal-head h3').textContent='单条方案图预览';$('#posterDialog').showModal()}
+function showSingleComboPoster(combo){posterMode='combo';if(!drawSingleComboPoster(combo))return;showPosterDialog('单条方案图预览')}
 function drawScanPoster(){
   const matches=state.matches.filter(m=>m.businessDate===state.activeDate).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
   if(!matches.length){toast('当前日期没有比赛');return false}
@@ -195,7 +202,7 @@ function drawScanPoster(){
   const footerY=tableY+62+rows.length*rowH+46;ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(42,footerY-14);ctx.lineTo(1158,footerY-14);ctx.stroke();ctx.fillStyle='#fff';ctx.font='italic 900 38px sans-serif';ctx.fillText('看赛事 · 做记录 · 理性研究',42,footerY+45);ctx.fillStyle='#9fb8b0';ctx.font='22px sans-serif';wrapText(ctx,state.settings.disclaimer,1080).slice(0,2).forEach((line,i)=>ctx.fillText(line,42,footerY+92+i*30));ctx.fillStyle='#f6c851';ctx.font='700 19px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,42,height-34);
   return true;
 }
-function showScanPoster(){posterMode='scan';if(!drawScanPoster())return;$('#posterDialog .modal-head h3').textContent='全部扫盘图预览';$('#posterDialog').showModal()}
+function showScanPoster(){posterMode='scan';if(!drawScanPoster())return;showPosterDialog('全部扫盘图预览')}
 function drawPoster(report){
   posterMode='detail';$('#posterDialog .modal-head h3').textContent='详细研究长图预览';
   const date=report?.date||state.activeDate,matches=report?.matches||selectedMatches(),drafts=report?.drafts||state.drafts,combos=report?.combos||state.combos[date]||[];
@@ -209,20 +216,21 @@ function drawPoster(report){
   ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(64,height-155);ctx.lineTo(1016,height-155);ctx.stroke();ctx.fillStyle='#9fb1c7';ctx.font='23px sans-serif';wrapText(ctx,state.settings.disclaimer,940).slice(0,2).forEach((line,i)=>ctx.fillText(line,64,height-105+i*32));ctx.fillStyle='#f6c851';ctx.font='700 20px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,64,height-36);
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
-function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');return}drawPoster();$('#posterDialog').showModal()}
-function downloadPoster(){const a=document.createElement('a'),prefix=posterMode==='scan'?'全部扫盘':posterMode==='combo'?'单条方案':'足球研究';a.download=`${prefix}-${state.activeDate}.png`;a.href=$('#posterCanvas').toDataURL('image/png');a.click();toast('图片已生成')}
+function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');return}drawPoster();showPosterDialog('详细研究长图预览')}
+async function downloadPoster(){const button=$('#downloadPosterBtn'),status=$('#posterSaveStatus');button.disabled=true;button.textContent='正在生成PNG…';try{const blob=await canvasToBlob(),filename=posterFilename();if(typeof File==='function'&&navigator.share&&navigator.canShare){const file=new File([blob],filename,{type:'image/png'});let canShare=false;try{canShare=navigator.canShare({files:[file]})}catch(error){console.warn('文件分享能力检测失败',error)}if(canShare){try{await navigator.share({files:[file],title:posterPrefix()});status.textContent='已打开系统分享面板，可保存到相册或发送给朋友。';status.className='poster-save-status success';return}catch(error){if(error?.name==='AbortError'){status.textContent='已取消分享，仍可长按上方图片保存。';return}console.warn('系统分享失败，改用下载方式',error)}}}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);status.textContent='已发起PNG下载；如果夸克没有弹出下载，请点击“打开大图 / 长按保存”。';status.className='poster-save-status success'}catch(error){console.error('保存PNG失败',error);status.textContent=`保存失败：${error?.message||'请使用长按图片保存'}`;status.className='poster-save-status error'}finally{button.disabled=false;button.textContent='保存或分享PNG'}}
+async function openPosterImage(){const status=$('#posterSaveStatus'),popup=window.open('about:blank','_blank');try{const blob=await canvasToBlob(),url=URL.createObjectURL(blob);if(popup){popup.document.open();popup.document.write(`<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(posterPrefix())}</title><style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0}img{display:block;width:100%;height:auto;-webkit-touch-callout:default}</style><p>请长按下方图片，选择“保存图片”</p><img src="${url}" alt="${esc(posterPrefix())}">`);popup.document.close();status.textContent='已打开大图，请在新页面长按图片保存。';status.className='poster-save-status success'}else{$('#posterImage').scrollIntoView({behavior:'smooth',block:'center'});status.textContent='夸克拦截了新页面，请直接长按上方图片，选择“保存图片”。';status.className='poster-save-status error'}}catch(error){if(popup)popup.close();console.error('打开大图失败',error);status.textContent='打开失败，请直接长按上方图片保存。';status.className='poster-save-status error'}}
 
 function renderSettings(){$('#authorInput').value=state.settings.author||'';$('#disclaimerInput').value=state.settings.disclaimer||''}
 function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`足球研究工作台备份-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);toast('备份已导出')}
-async function importData(file){try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.matches))throw new Error('格式不正确');state={...structuredClone(DEFAULT_STATE),...data};saveState();renderAll();toast('备份导入成功')}catch{toast('导入失败：文件格式不正确')}}
+async function importData(file){try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.matches))throw new Error('格式不正确');state={...deepClone(DEFAULT_STATE),...data};saveState();renderAll();toast('备份导入成功')}catch{toast('导入失败：文件格式不正确')}}
 
 function bind(){
-  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=()=>$('#posterDialog').close();$('#downloadPosterBtn').onclick=downloadPoster;
+  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=()=>$('#posterDialog').close();$('#downloadPosterBtn').onclick=downloadPoster;$('#openPosterBtn').onclick=openPosterImage;
   $('#dateStrip').onclick=e=>{const b=e.target.closest('[data-date]');if(b){state.activeDate=b.dataset.date;saveState();renderAll()}};
   $('#filterBar').onclick=e=>{const b=e.target.closest('[data-filter]');if(b){activeFilter=b.dataset.filter;$$('#filterBar button').forEach(x=>x.classList.toggle('active',x===b));renderMatches()}};
   $$('.bottom-nav button').forEach(b=>b.onclick=()=>{$$('.bottom-nav button').forEach(x=>x.classList.toggle('active',x===b));$$('.page').forEach(p=>p.classList.toggle('active',p.id===b.dataset.page));if(b.dataset.page==='plansPage')renderCombos()});
   $('#saveSettingsBtn').onclick=()=>{state.settings.author=$('#authorInput').value.trim()||'足球研究员';state.settings.disclaimer=$('#disclaimerInput').value.trim();saveState();toast('设置已保存')};
-  $('#exportBtn').onclick=exportData;$('#importInput').onchange=e=>e.target.files[0]&&importData(e.target.files[0]);$('#clearBtn').onclick=()=>{if(confirm('确定清空本机的全部比赛、方案和历史记录吗？')){state=structuredClone(DEFAULT_STATE);saveState();renderAll();toast('本机数据已清空')}};
+  $('#exportBtn').onclick=exportData;$('#importInput').onchange=e=>e.target.files[0]&&importData(e.target.files[0]);$('#clearBtn').onclick=()=>{if(confirm('确定清空本机的全部比赛、方案和历史记录吗？')){state=deepClone(DEFAULT_STATE);saveState();renderAll();toast('本机数据已清空')}};
 }
 
 bind();renderAll();fetchMatches(false);
