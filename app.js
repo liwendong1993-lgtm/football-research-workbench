@@ -1,5 +1,6 @@
-const API='https://webapi.sporttery.cn/gateway/uniform/football/getMatchCalculatorV1.qry?channel=c&poolCode=hhad,had';
+const API_BASE='https://webapi.sporttery.cn/gateway/uniform/football/getMatchCalculatorV1.qry?channel=c&poolCode=';
 const STORE_KEY='football-workbench-v1';
+const {parseScorePicks,crsKeyForScore,splitOptionValue,normalizeComboItems,comboMetrics}=ComboUtils;
 const DEFAULT_STATE={matches:[],drafts:{},combos:{},reports:[],activeDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:''};
 let state=loadState();
 let activeFilter='all';
@@ -24,13 +25,18 @@ function selectedMatches(){return state.matches.filter(m=>m.businessDate===state
 async function fetchMatches(show=true){
   if(show) $('#dataStatus').textContent='正在读取比赛...';
   try{
-    const res=await fetch(API,{cache:'no-store'}); if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const loadPool=async pool=>{const r=await fetch(API_BASE+pool,{cache:'no-store'});if(!r.ok)throw new Error(`${pool} HTTP ${r.status}`);return r.json()};
+    const res=await fetch(API_BASE+'hhad,had',{cache:'no-store'}); if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json=await res.json(); if(!json.success) throw new Error(json.errorMessage||'接口返回失败');
+    const [goalsJson,scoresJson]=await Promise.all([loadPool('ttg').catch(()=>null),loadPool('crs').catch(()=>null)]);
+    const poolMap=data=>new Map((data?.value?.matchInfoList||[]).flatMap(g=>g.subMatchList).map(m=>[String(m.matchId),m]));
+    const goalMap=poolMap(goalsJson),scoreMap=poolMap(scoresJson);
     const list=json.value.matchInfoList.flatMap(g=>g.subMatchList).map(m=>({
       id:String(m.matchId),businessDate:m.businessDate,matchDate:m.matchDate,time:(m.matchTime||'').slice(0,5),
       num:m.matchNumStr||`${m.matchWeek||''}${String(m.matchNum||'').slice(-3)}`,league:m.leagueAbbName||m.leagueAllName,
       home:m.homeTeamAbbName||m.homeTeamAllName,away:m.awayTeamAbbName||m.awayTeamAllName,
-      homeRank:m.homeRank||'',awayRank:m.awayRank||'',status:m.matchStatus,had:m.had||{},hhad:m.hhad||{},manual:false
+      homeRank:m.homeRank||'',awayRank:m.awayRank||'',status:m.matchStatus,had:m.had||{},hhad:m.hhad||{},
+      ttg:goalMap.get(String(m.matchId))?.ttg||{},crs:scoreMap.get(String(m.matchId))?.crs||{},manual:false
     }));
     const manual=state.matches.filter(m=>m.manual);
     state.matches=[...list,...manual.filter(x=>!list.some(m=>m.id===x.id))];
@@ -95,20 +101,29 @@ function openEdit(id){
   $('#saveDraftBtn').onclick=()=>{d.scores=$('#scoreInput').value.trim();d.note=$('#noteInput').value.trim();state.drafts[id]=d;saveState();dlg.close();renderAll();toast('已保存本场研究')};
 }
 
-function availableOptions(m,d){const opts=[];d.spf.forEach(p=>opts.push({market:'spf',pick:p,label:`${pickLabel('spf',p)} ${m.had?.[p]||'--'}`,odd:oddFor(m,'had',p)}));d.hhad.forEach(p=>opts.push({market:'hhad',pick:p,label:`${m.hhad?.goalLine||'让球'} ${pickLabel('hhad',p)} ${m.hhad?.[p]||'--'}`,odd:oddFor(m,'hhad',p)}));return opts}
+function availableOptions(m,d){
+  const opts=[];
+  d.spf.forEach(p=>opts.push({market:'spf',pick:p,label:`${pickLabel('spf',p)} ${m.had?.[p]||'--'}`,odd:oddFor(m,'had',p)}));
+  d.hhad.forEach(p=>opts.push({market:'hhad',pick:p,label:`${m.hhad?.goalLine||'让球'} ${pickLabel('hhad',p)} ${m.hhad?.[p]||'--'}`,odd:oddFor(m,'hhad',p)}));
+  d.goals.forEach(p=>{const key=`s${p==='7+'?'7':p}`,odd=Number(m.ttg?.[key])||0;opts.push({market:'goals',pick:p,label:`进球${p} ${odd||'--'}`,odd})});
+  parseScorePicks(d.scores).forEach(p=>{const odd=Number(m.crs?.[crsKeyForScore(p)])||0;opts.push({market:'scores',pick:p,label:`比分${p} ${odd||'--'}`,odd})});
+  return opts;
+}
+function optionText(label){return String(label||'').replace(/\s+(?:\d+(?:\.\d+)?|--)$/,'')}
 function renderCombos(){
   const list=state.combos[state.activeDate]||[];
-  $('#comboList').innerHTML=list.length?list.map(c=>{const product=c.items.reduce((n,x)=>n*(Number(x.odd)||1),1);return `<article class="combo-card"><h3>${esc(c.name)}</h3><p class="combo-meta">${c.items.length}场组合 · 创建于 ${esc(c.time||'')}</p><div class="combo-items">${c.items.map(x=>`<div class="combo-item"><span>${esc(x.num)} ${esc(x.home)}</span><strong>${esc(x.label)}</strong></div>`).join('')}</div><div class="combo-odds">参考 ${product.toFixed(2)}</div><div class="combo-actions"><button class="secondary" data-edit-combo="${c.id}">编辑</button><button class="secondary" data-delete-combo="${c.id}">删除</button></div></article>`}).join(''):'<div class="empty">还没有组合方案<br>先编辑比赛，再创建方案</div>';
+  $('#comboList').innerHTML=list.length?list.map(c=>{const items=normalizeComboItems(c.items),metrics=comboMetrics(items),range=metrics.minOdd===metrics.maxOdd?metrics.minOdd.toFixed(2):`${metrics.minOdd.toFixed(2)}–${metrics.maxOdd.toFixed(2)}`;return `<article class="combo-card"><h3>${esc(c.name)}</h3><p class="combo-meta">${metrics.legs}场 · ${metrics.tickets}注 · 创建于 ${esc(c.time||'')}</p><div class="combo-items">${items.map(x=>`<div class="combo-item"><span>${esc(x.num)} ${esc(x.home)}</span><span class="combo-selection">${x.options.map(o=>`<b class="tag">${esc(optionText(o.label))}</b>`).join('')}</span></div>`).join('')}</div><div class="combo-odds">${metrics.complete?`参考赔率 ${range}`:'部分选项暂无赔率'} · ${metrics.tickets}注</div><div class="combo-actions"><button class="secondary" data-edit-combo="${c.id}">编辑</button><button class="secondary" data-delete-combo="${c.id}">删除</button></div></article>`}).join(''):'<div class="empty">还没有组合方案<br>先编辑比赛，再创建方案</div>';
   $$('[data-edit-combo]').forEach(b=>b.onclick=()=>openCombo(b.dataset.editCombo));
   $$('[data-delete-combo]').forEach(b=>b.onclick=()=>{state.combos[state.activeDate]=list.filter(c=>c.id!==b.dataset.deleteCombo);saveState();renderCombos()});
 }
 function openCombo(id){
   const matches=selectedMatches().filter(m=>availableOptions(m,draftFor(m.id)).length);
-  if(!matches.length){toast('请先编辑至少一场胜平负或让球选择');return}
-  const existing=(state.combos[state.activeDate]||[]).find(c=>c.id===id);const selected=new Map((existing?.items||[]).map(x=>[x.matchId,`${x.market}:${x.pick}`]));
-  $('#comboContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">PLAN BUILDER</p><h2>${existing?'编辑':'新建'}组合方案</h2></div><button value="cancel">×</button></div><label>方案名称<input id="comboName" class="field-input" value="${esc(existing?.name||'稳健方案')}" /></label><div class="pick-group"><h4>选择场次与选项</h4>${matches.map(m=>{const opts=availableOptions(m,draftFor(m.id));return `<div class="combo-item" style="margin-bottom:8px"><label><input type="checkbox" class="combo-check" data-id="${m.id}" ${selected.has(m.id)?'checked':''}> ${esc(m.num)} ${esc(m.home)} vs ${esc(m.away)}</label><select class="field-input combo-select" data-id="${m.id}" style="width:150px;margin:0">${opts.map(o=>`<option value="${o.market}:${o.pick}" ${selected.get(m.id)===`${o.market}:${o.pick}`?'selected':''}>${esc(o.label)}</option>`).join('')}</select></div>`}).join('')}</div><button type="button" id="saveCombo" class="primary full">保存组合方案</button>`;
+  if(!matches.length){toast('请先编辑至少一场比赛选择');return}
+  const existing=(state.combos[state.activeDate]||[]).find(c=>c.id===id),existingItems=normalizeComboItems(existing?.items||[]);
+  const selected=new Map(existingItems.map(x=>[x.matchId,new Set(x.options.map(o=>`${o.market}:${o.pick}`))]));
+  $('#comboContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">PLAN BUILDER</p><h2>${existing?'编辑':'新建'}组合方案</h2></div><button value="cancel">×</button></div><label>方案名称<input id="comboName" class="field-input" value="${esc(existing?.name||'稳健方案')}" /></label><div class="pick-group"><h4>每场可多选</h4><p class="section-note">胜平负、让球、进球数和比分都可以同时勾选多个。</p>${matches.map(m=>{const opts=availableOptions(m,draftFor(m.id)),set=selected.get(m.id)||new Set();return `<div class="combo-match-select" data-match="${m.id}"><div class="combo-match-title">${esc(m.num)} ${esc(m.home)} vs ${esc(m.away)}</div><div class="combo-option-grid">${opts.map(o=>`<label class="combo-option-label"><input type="checkbox" class="combo-option" data-id="${m.id}" data-value="${o.market}:${o.pick}" ${set.has(`${o.market}:${o.pick}`)?'checked':''}><span>${esc(o.label)}</span></label>`).join('')}</div></div>`}).join('')}</div><button type="button" id="saveCombo" class="primary full">保存组合方案</button>`;
   const dlg=$('#comboDialog');dlg.showModal();
-  $('#saveCombo').onclick=()=>{const items=[];$$('.combo-check:checked').forEach(ch=>{const m=matches.find(x=>x.id===ch.dataset.id),raw=$(`.combo-select[data-id="${ch.dataset.id}"]`).value,[market,pick]=raw.split(':'),o=availableOptions(m,draftFor(m.id)).find(x=>x.market===market&&x.pick===pick);items.push({matchId:m.id,num:m.num,home:m.home,away:m.away,...o})});if(items.length<2){toast('组合方案至少选择两场');return}const all=state.combos[state.activeDate]||[],combo={id:existing?.id||uid(),name:$('#comboName').value.trim()||'未命名方案',items,time:new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})};state.combos[state.activeDate]=existing?all.map(c=>c.id===existing.id?combo:c):[...all,combo];saveState();dlg.close();renderCombos();toast('组合方案已保存')};
+  $('#saveCombo').onclick=()=>{const items=[];matches.forEach(m=>{const checked=[...document.querySelectorAll(`.combo-option[data-id="${m.id}"]:checked`)];if(!checked.length)return;const opts=availableOptions(m,draftFor(m.id)),options=checked.map(ch=>{const [market,pick]=splitOptionValue(ch.dataset.value);return opts.find(o=>o.market===market&&o.pick===pick)}).filter(Boolean);items.push({matchId:m.id,num:m.num,home:m.home,away:m.away,options})});if(items.length<2){toast('组合方案至少选择两场');return}const all=state.combos[state.activeDate]||[],combo={id:existing?.id||uid(),name:$('#comboName').value.trim()||'未命名方案',items,time:new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})};state.combos[state.activeDate]=existing?all.map(c=>c.id===existing.id?combo:c):[...all,combo];saveState();dlg.close();renderCombos();toast('多选组合方案已保存')};
 }
 
 function openManual(){
@@ -131,12 +146,12 @@ function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let 
 function drawPoster(report){
   const date=report?.date||state.activeDate,matches=report?.matches||selectedMatches(),drafts=report?.drafts||state.drafts,combos=report?.combos||state.combos[date]||[];
   const rows=matches.map(m=>{const d=drafts[m.id]||draftFor(m.id);let parts=[];if(d.spf?.length)parts.push(`胜平负 ${d.spf.map(x=>pickLabel('spf',x)).join('/')}`);if(d.hhad?.length)parts.push(`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`);if(d.goals?.length)parts.push(`进球 ${d.goals.join('/')}`);if(d.scores)parts.push(`比分 ${d.scores}`);return {m,d,parts}});
-  const height=480+rows.reduce((n,r)=>n+180+(r.d.note?70:0),0)+combos.length*130+180;
+  const height=480+rows.reduce((n,r)=>n+180+(r.d.note?70:0),0)+combos.length*170+180;
   const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d');canvas.width=1080;canvas.height=height;
   const grad=ctx.createLinearGradient(0,0,1080,height);grad.addColorStop(0,'#091523');grad.addColorStop(1,'#102b45');ctx.fillStyle=grad;ctx.fillRect(0,0,1080,height);
   ctx.fillStyle='#f6c851';ctx.fillRect(64,60,72,8);ctx.font='700 28px sans-serif';ctx.fillText('FOOTBALL RESEARCH',64,120);ctx.fillStyle='#ffffff';ctx.font='900 66px sans-serif';ctx.fillText(state.settings.author||'足球研究员',64,205);ctx.fillStyle='#9fb1c7';ctx.font='34px sans-serif';ctx.fillText(`${date}  ${weekday(date)}足球研究`,64,265);
   let y=345;rows.forEach(({m,d,parts},idx)=>{ctx.fillStyle='rgba(255,255,255,.06)';roundRect(ctx,48,y-40,984,140+(d.note?70:0),24);ctx.fillStyle=d.confidence==='主推'?'#f6c851':'#6faeff';ctx.font='800 27px sans-serif';ctx.fillText(`${m.num} · ${m.league}${d.confidence?` · ${d.confidence}`:''}`,76,y);ctx.fillStyle='#fff';ctx.font='900 35px sans-serif';ctx.fillText(`${m.home}  VS  ${m.away}`,76,y+50);ctx.fillStyle='#c4d1e1';ctx.font='28px sans-serif';ctx.fillText(parts.join('　')||'已记录分析',76,y+94);if(d.note){ctx.fillStyle='#8fa1b8';ctx.font='24px sans-serif';const lines=wrapText(ctx,d.note,900).slice(0,2);lines.forEach((line,i)=>ctx.fillText(line,76,y+137+i*31))}y+=180+(d.note?70:0)});
-  if(combos.length){ctx.fillStyle='#f6c851';ctx.font='900 34px sans-serif';ctx.fillText('今日组合',64,y+10);y+=65;combos.forEach(c=>{const product=c.items.reduce((n,x)=>n*(Number(x.odd)||1),1);ctx.fillStyle='rgba(246,200,81,.10)';roundRect(ctx,48,y-35,984,95,20);ctx.fillStyle='#fff';ctx.font='800 29px sans-serif';ctx.fillText(`${c.name}：${c.items.map(x=>`${x.num}${x.label.split(' ')[0]}`).join(' × ')}`,72,y+10);ctx.fillStyle='#f6c851';ctx.textAlign='right';ctx.fillText(product.toFixed(2),990,y+10);ctx.textAlign='left';y+=130})}
+  if(combos.length){ctx.fillStyle='#f6c851';ctx.font='900 34px sans-serif';ctx.fillText('今日组合',64,y+10);y+=65;combos.forEach(c=>{const items=normalizeComboItems(c.items),metrics=comboMetrics(items),selection=items.map(x=>`${x.num}[${x.options.map(o=>optionText(o.label)).join('/')}]`).join(' × '),range=metrics.minOdd===metrics.maxOdd?metrics.minOdd.toFixed(2):`${metrics.minOdd.toFixed(2)}–${metrics.maxOdd.toFixed(2)}`;ctx.fillStyle='rgba(246,200,81,.10)';roundRect(ctx,48,y-35,984,135,20);ctx.fillStyle='#fff';ctx.font='800 29px sans-serif';ctx.fillText(c.name,72,y+5);ctx.fillStyle='#c4d1e1';ctx.font='24px sans-serif';wrapText(ctx,selection,880).slice(0,2).forEach((line,i)=>ctx.fillText(line,72,y+43+i*29));ctx.fillStyle='#f6c851';ctx.font='700 22px sans-serif';ctx.fillText(`${metrics.tickets}注 · ${metrics.complete?`参考赔率 ${range}`:'部分选项暂无赔率'}`,72,y+88);y+=170})}
   ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(64,height-155);ctx.lineTo(1016,height-155);ctx.stroke();ctx.fillStyle='#9fb1c7';ctx.font='23px sans-serif';wrapText(ctx,state.settings.disclaimer,940).slice(0,2).forEach((line,i)=>ctx.fillText(line,64,height-105+i*32));ctx.fillStyle='#f6c851';ctx.font='700 20px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,64,height-36);
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
