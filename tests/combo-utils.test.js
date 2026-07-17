@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseScorePicks, crsKeyForScore, scoreOddsLabel, comboMetrics, normalizeComboItems, splitOptionValue, schemePrizeRange, enforceSingleMarketPerMatch } = require('../combo-utils.js');
+const { parseScorePicks, crsKeyForScore, scoreOddsLabel, comboMetrics, normalizeComboItems, splitOptionValue, schemePrizeRange, enforceSingleMarketPerMatch, passTypeLabel } = require('../combo-utils.js');
 
 test('比分字符串可按中文顿号、逗号和空格拆成多个比分并去重', () => {
   assert.deepEqual(parseScorePicks('2:1、1:1, 0:2  2:1'), ['2:1', '1:1', '0:2']);
@@ -52,6 +52,14 @@ test('映射到同一个其他比分赔率的多个输入只计为一个投注�
     {market:'scores',pick:'4:3',odd:35},{market:'scores',pick:'5:3',odd:35}
   ]}]);
   assert.equal(result[0].options.length,1);
+});
+
+test('单场方案保留所选注数并显示为单场而不是一串一', () => {
+  const items=[{matchId:'1',options:[{market:'spf',pick:'h',odd:2},{market:'spf',pick:'d',odd:3}]}];
+  assert.equal(comboMetrics(items).tickets,2);
+  assert.equal(schemePrizeRange(items,2).cost,4);
+  assert.equal(passTypeLabel(1),'单场');
+  assert.equal(passTypeLabel(3),'3串1');
 });
 
 test('整个方案金额等于选项笛卡尔积注数乘固定2元', () => {

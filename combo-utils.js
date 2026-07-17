@@ -91,6 +91,8 @@
     return {tickets:metrics.tickets,cost:roundMoney(metrics.tickets*Number(stake)),minPrize,maxPrize,complete:metrics.complete&&possible};
   }
 
+  function passTypeLabel(legs){return Number(legs)===1?'单场':`${Number(legs)||0}串1`}
+
   function comboMetrics(items){
     const groups=normalizeComboItems(items).filter(x=>x.options.length);
     if(!groups.length) return {legs:0,tickets:0,minOdd:0,maxOdd:0,complete:false};
@@ -104,5 +106,5 @@
     return {legs:groups.length,tickets,minOdd,maxOdd,complete};
   }
 
-  return {parseScorePicks,crsKeyForScore,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange};
+  return {parseScorePicks,crsKeyForScore,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange,passTypeLabel};
 });
