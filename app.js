@@ -7,7 +7,6 @@ let state=loadState();
 let activeFilter='all';
 let editingId=null;
 let posterMode='detail';
-let posterObjectUrl='';
 
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
@@ -162,8 +161,9 @@ function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let 
 function posterPrefix(){return posterMode==='scan'?'全部扫盘':posterMode==='combo'?'单条方案':'足球研究'}
 function posterFilename(){return `${posterPrefix()}-${state.activeDate}.png`}
 function canvasToBlob(){const canvas=$('#posterCanvas');return new Promise((resolve,reject)=>{if(typeof canvas.toBlob==='function')canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('图片转换失败')),'image/png');else try{const data=atob(canvas.toDataURL('image/png').split(',')[1]),bytes=new Uint8Array(data.length);for(let i=0;i<data.length;i++)bytes[i]=data.charCodeAt(i);resolve(new Blob([bytes],{type:'image/png'}))}catch(error){reject(error)}})}
-async function refreshPosterPreview(){try{const blob=await canvasToBlob();if(posterObjectUrl)URL.revokeObjectURL(posterObjectUrl);posterObjectUrl=URL.createObjectURL(blob);$('#posterImage').src=posterObjectUrl}catch(error){console.error('生成图片预览失败',error);$('#posterSaveStatus').textContent='图片预览生成失败，请重新生成';$('#posterSaveStatus').className='poster-save-status error'}}
-function showPosterDialog(title){$('#posterDialog .modal-head h3').textContent=title;$('#posterSaveStatus').textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';$('#posterSaveStatus').className='poster-save-status';const dlg=$('#posterDialog');if(!dlg.open)dlg.showModal();refreshPosterPreview()}
+function refreshPosterPreview(){const canvas=$('#posterCanvas'),image=$('#posterImage'),status=$('#posterSaveStatus');canvas.hidden=false;image.hidden=true;image.onload=()=>{image.hidden=false;canvas.hidden=true};image.onerror=()=>{image.removeAttribute('src');image.hidden=true;canvas.hidden=false;status.textContent='夸克未能加载图片预览，已自动回退显示海报；请使用下方保存按钮。';status.className='poster-save-status error'};try{image.src=canvas.toDataURL('image/png')}catch(error){console.error('生成图片预览失败',error);image.onerror()}}
+function showPosterDialog(title){$('#posterDialog .modal-head h3').textContent=title;$('#posterSaveStatus').textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';$('#posterSaveStatus').className='poster-save-status';$('#posterDialog').hidden=false;document.body.style.overflow='hidden';refreshPosterPreview()}
+function closePosterDialog(){$('#posterDialog').hidden=true;document.body.style.overflow=''}
 function drawFitText(ctx,text,x,y,maxWidth,startSize=24,minSize=14,weight=700){let size=startSize;do{ctx.font=`${weight} ${size}px sans-serif`;if(ctx.measureText(String(text)).width<=maxWidth)break;size-=1}while(size>minSize);ctx.fillText(String(text),x,y)}
 function comboPosterGroups(item,match){
   const order=['spf','hhad','goals','scores'];
@@ -226,7 +226,7 @@ function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'
 async function importData(file){try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.matches))throw new Error('格式不正确');state={...deepClone(DEFAULT_STATE),...data};saveState();renderAll();toast('备份导入成功')}catch{toast('导入失败：文件格式不正确')}}
 
 function bind(){
-  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=()=>$('#posterDialog').close();$('#downloadPosterBtn').onclick=downloadPoster;$('#openPosterBtn').onclick=openPosterImage;
+  $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#saveReportBtn').onclick=saveReport;$('#closePosterBtn').onclick=closePosterDialog;$('[data-close-poster]').onclick=closePosterDialog;$('#downloadPosterBtn').onclick=downloadPoster;$('#openPosterBtn').onclick=openPosterImage;
   $('#dateStrip').onclick=e=>{const b=e.target.closest('[data-date]');if(b){state.activeDate=b.dataset.date;saveState();renderAll()}};
   $('#filterBar').onclick=e=>{const b=e.target.closest('[data-filter]');if(b){activeFilter=b.dataset.filter;$$('#filterBar button').forEach(x=>x.classList.toggle('active',x===b));renderMatches()}};
   $$('.bottom-nav button').forEach(b=>b.onclick=()=>{$$('.bottom-nav button').forEach(x=>x.classList.toggle('active',x===b));$$('.page').forEach(p=>p.classList.toggle('active',p.id===b.dataset.page));if(b.dataset.page==='plansPage')renderCombos()});
@@ -235,4 +235,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260717-1705',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

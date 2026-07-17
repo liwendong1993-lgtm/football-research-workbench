@@ -1,5 +1,12 @@
-const CACHE='football-workbench-v8';
-const ASSETS=['./','./index.html','./styles.css','./combo-utils.js','./scan-utils.js','./app.js','./manifest.webmanifest','./icon.svg'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
-self.addEventListener('fetch',e=>{if(e.request.url.includes('webapi.sporttery.cn')) return; e.respondWith(fetch(e.request).then(r=>{const copy=r.clone(); caches.open(CACHE).then(c=>c.put(e.request,copy)); return r}).catch(()=>caches.match(e.request)));});
+const CACHE='football-workbench-v9';
+const ASSETS=['./','./index.html','./styles.css?v=20260717-1705','./combo-utils.js?v=20260717-1705','./scan-utils.js?v=20260717-1705','./app.js?v=20260717-1705','./manifest.webmanifest','./icon.svg'];
+self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',event=>{
+  const request=event.request,url=new URL(request.url);
+  if(request.method!=='GET'||url.origin!==self.location.origin)return;
+  event.respondWith(fetch(request,{cache:'no-store'}).then(response=>{
+    if(response.ok)caches.open(CACHE).then(cache=>cache.put(request,response.clone()));
+    return response;
+  }).catch(async()=>await caches.match(request)||(request.mode==='navigate'?await caches.match('./index.html'):Response.error())));
+});
