@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#09111f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>足球研究工作台</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">FOOTBALL RESEARCH</p>
+        <h1>足球研究工作台</h1>
+      </div>
+      <button class="icon-btn" id="refreshBtn" aria-label="刷新比赛" title="刷新比赛">↻</button>
+    </header>
+
+    <main>
+      <section class="page active" id="todayPage">
+        <div class="hero-card">
+          <div>
+            <span class="live-dot"></span><span id="dataStatus">正在读取比赛...</span>
+            <h2 id="heroTitle">今日研究</h2>
+            <p id="heroSubtitle">选择比赛并记录你的判断</p>
+          </div>
+          <div class="progress-ring" id="progressRing"><strong id="editedCount">0</strong><span>已研究</span></div>
+        </div>
+
+        <div class="date-strip" id="dateStrip"></div>
+        <div class="toolbar">
+          <div class="segmented" id="filterBar">
+            <button class="active" data-filter="all">全部</button>
+            <button data-filter="edited">已编辑</button>
+            <button data-filter="primary">主推</button>
+          </div>
+          <button class="text-btn" id="manualAddBtn">＋ 手动添加</button>
+        </div>
+        <div class="match-list" id="matchList"></div>
+      </section>
+
+      <section class="page" id="plansPage">
+        <div class="section-heading">
+          <div><p class="eyebrow">PLAN BUILDER</p><h2>方案组合</h2></div>
+          <button class="primary small" id="addComboBtn">＋ 新方案</button>
+        </div>
+        <p class="section-note">从已编辑场次中组合选项，参考赔率会自动计算。</p>
+        <div id="comboList" class="combo-list"></div>
+        <div class="publish-panel">
+          <h3>发布预览</h3>
+          <p>生成图片前会保存当前赔率和编辑时间。图片仅用于展示个人足球研究观点。</p>
+          <button class="primary full" id="posterBtn">生成微信长图</button>
+          <button class="secondary full" id="saveReportBtn">保存到历史记录</button>
+        </div>
+      </section>
+
+      <section class="page" id="historyPage">
+        <div class="section-heading"><div><p class="eyebrow">ARCHIVE</p><h2>历史记录</h2></div></div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
+      <section class="page" id="settingsPage">
+        <div class="section-heading"><div><p class="eyebrow">LOCAL FIRST</p><h2>设置与备份</h2></div></div>
+        <div class="settings-card">
+          <label>作者名称<input id="authorInput" maxlength="20" placeholder="例如：老李足球研究" /></label>
+          <label>分享图底部说明<textarea id="disclaimerInput" rows="3"></textarea></label>
+          <button class="primary full" id="saveSettingsBtn">保存设置</button>
+        </div>
+        <div class="settings-card">
+          <h3>数据备份</h3>
+          <p>所有内容只保存在当前浏览器。请定期导出备份，避免清理缓存后丢失。</p>
+          <div class="button-grid">
+            <button class="secondary" id="exportBtn">导出JSON</button>
+            <label class="secondary file-label">导入JSON<input type="file" id="importInput" accept="application/json" /></label>
+          </div>
+          <button class="danger-link" id="clearBtn">清空本机全部数据</button>
+        </div>
+        <div class="settings-card info-card">
+          <h3>关于数据</h3>
+          <p>比赛与参考赔率来自中国体彩网公开页面接口。接口可能调整；正式商业使用前应确认数据授权。系统不提供投注、代购或跟单。</p>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="active" data-page="todayPage"><span>⚽</span>今日</button>
+      <button data-page="plansPage"><span>▦</span>方案</button>
+      <button data-page="historyPage"><span>◷</span>历史</button>
+      <button data-page="settingsPage"><span>⚙</span>设置</button>
+    </nav>
+  </div>
+
+  <dialog id="editDialog" class="sheet-dialog"><form method="dialog" id="editForm"><div id="editContent"></div></form></dialog>
+  <dialog id="comboDialog" class="sheet-dialog"><form method="dialog" id="comboForm"><div id="comboContent"></div></form></dialog>
+  <dialog id="manualDialog" class="sheet-dialog"><form method="dialog" id="manualForm"><div id="manualContent"></div></form></dialog>
+  <dialog id="posterDialog" class="poster-dialog"><div class="poster-modal"><div class="modal-head"><h3>微信长图预览</h3><button id="closePosterBtn" class="icon-btn">×</button></div><canvas id="posterCanvas"></canvas><button id="downloadPosterBtn" class="primary full">保存PNG图片</button></div></dialog>
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
