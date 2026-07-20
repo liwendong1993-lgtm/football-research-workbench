@@ -9,7 +9,7 @@
   <title>足球研究工作台</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" />
-  <link rel="stylesheet" href="styles.css?v=20260717-1718" />
+  <link rel="stylesheet" href="styles.css?v=20260720-compact1" />
 </head>
 <body>
   <div class="app-shell">
@@ -24,12 +24,11 @@
     <main>
       <section class="page active" id="todayPage">
         <div class="hero-card">
-          <div>
-            <span class="live-dot"></span><span id="dataStatus">正在读取比赛...</span>
-            <h2 id="heroTitle">今日研究</h2>
-            <p id="heroSubtitle">选择比赛并记录你的判断</p>
+          <div class="hero-summary-line">
+            <span class="hero-sync"><span class="live-dot"></span><span id="dataStatus">同步中</span></span>
+            <strong id="heroTitle">今日比赛</strong>
+            <span class="hero-progress">已研究 <strong id="editedCount">0</strong>/<span id="totalCount">0</span></span>
           </div>
-          <div class="progress-ring" id="progressRing"><strong id="editedCount">0</strong><span>已研究</span></div>
         </div>
 
         <div class="date-strip" id="dateStrip"></div>
@@ -101,8 +100,8 @@
   <dialog id="manualDialog" class="sheet-dialog"><form method="dialog" id="manualForm"><div id="manualContent"></div></form></dialog>
   <div id="posterDialog" class="poster-dialog" hidden><div class="poster-backdrop" data-close-poster></div><div class="poster-modal"><div class="modal-head"><h3>微信长图预览</h3><button type="button" id="closePosterBtn" class="icon-btn">×</button></div><canvas id="posterCanvas" class="poster-source-canvas"></canvas><img id="posterImage" class="poster-image" hidden alt="方案图片预览，可长按保存" /><p id="posterSaveStatus" class="poster-save-status" aria-live="polite">安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。</p><button type="button" id="downloadPosterBtn" class="primary full">保存或分享PNG</button><button type="button" id="openPosterBtn" class="secondary full">打开大图 / 长按保存</button></div></div>
   <div class="toast" id="toast"></div>
-  <script src="combo-utils.js?v=20260717-1718"></script>
-  <script src="scan-utils.js?v=20260717-1718"></script>
-  <script src="app.js?v=20260717-1718"></script>
+  <script src="combo-utils.js?v=20260720-compact1"></script>
+  <script src="scan-utils.js?v=20260720-compact1"></script>
+  <script src="app.js?v=20260720-compact1"></script>
 </body>
 </html>

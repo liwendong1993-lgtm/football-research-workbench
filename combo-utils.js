@@ -80,15 +80,16 @@
     return [...sums];
   }
 
-  function schemePrizeRange(items,stake=2){
-    const groups=normalizeComboItems(items).filter(x=>x.options.length),metrics=comboMetrics(groups);
-    if(!groups.length)return {tickets:0,cost:0,minPrize:0,maxPrize:0,complete:false};
+  function schemePrizeRange(items,stake=2,multiple=1){
+    const normalizedMultiple=Math.max(1,Math.min(99999,Math.floor(Number(multiple)||1))),groups=normalizeComboItems(items).filter(x=>x.options.length),metrics=comboMetrics(groups);
+    if(!groups.length)return {tickets:0,multiple:normalizedMultiple,cost:0,minPrize:0,maxPrize:0,complete:false};
     const ranges=groups.map(legWinningSums);
     const possible=ranges.every(x=>x.length>0);
-    const roundMoney=n=>Math.round(n*100)/100;
-    const minPrize=possible?roundMoney(Number(stake)*ranges.reduce((n,x)=>n*Math.min(...x),1)):0;
-    const maxPrize=possible?roundMoney(Number(stake)*ranges.reduce((n,x)=>n*Math.max(...x),1)):0;
-    return {tickets:metrics.tickets,cost:roundMoney(metrics.tickets*Number(stake)),minPrize,maxPrize,complete:metrics.complete&&possible};
+    const roundMoney=n=>Math.round(n*100)/100,unitStake=Number(stake);
+    const baseCost=roundMoney(metrics.tickets*unitStake);
+    const baseMinPrize=possible?roundMoney(unitStake*ranges.reduce((n,x)=>n*Math.min(...x),1)):0;
+    const baseMaxPrize=possible?roundMoney(unitStake*ranges.reduce((n,x)=>n*Math.max(...x),1)):0;
+    return {tickets:metrics.tickets,multiple:normalizedMultiple,cost:roundMoney(baseCost*normalizedMultiple),minPrize:roundMoney(baseMinPrize*normalizedMultiple),maxPrize:roundMoney(baseMaxPrize*normalizedMultiple),complete:metrics.complete&&possible};
   }
 
   function passTypeLabel(legs){return Number(legs)===1?'单场':`${Number(legs)||0}串1`}

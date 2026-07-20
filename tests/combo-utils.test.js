@@ -62,6 +62,32 @@ test('单场方案保留所选注数并显示为单场而不是一串一', () =>
   assert.equal(passTypeLabel(3),'3串1');
 });
 
+test('方案倍投会同步放大投注金额和理论最低最高返奖', () => {
+  const items=[{matchId:'1',options:[{market:'spf',pick:'h',odd:2}]}];
+  const base=schemePrizeRange(items,2,1),triple=schemePrizeRange(items,2,3);
+  assert.equal(triple.multiple,3);
+  assert.equal(triple.cost,base.cost*3);
+  assert.equal(triple.minPrize,base.minPrize*3);
+  assert.equal(triple.maxPrize,base.maxPrize*3);
+});
+
+test('小数赔率的倍投严格按已显示的一倍金额同比缩放', () => {
+  const items=[{matchId:'1',options:[{market:'spf',pick:'h',odd:1.337}]}];
+  const base=schemePrizeRange(items,2,1),triple=schemePrizeRange(items,2,3);
+  assert.equal(base.minPrize,2.67);
+  assert.equal(triple.minPrize,base.minPrize*3);
+  assert.equal(triple.maxPrize,base.maxPrize*3);
+});
+
+test('方案倍数兼容旧数据并归一化异常输入', () => {
+  const items=[{matchId:'1',options:[{market:'spf',pick:'h',odd:2}]}];
+  assert.equal(schemePrizeRange(items,2).multiple,1);
+  assert.equal(schemePrizeRange(items,2,'').multiple,1);
+  assert.equal(schemePrizeRange(items,2,-3).multiple,1);
+  assert.equal(schemePrizeRange(items,2,2.9).multiple,2);
+  assert.equal(schemePrizeRange(items,2,100000).multiple,99999);
+});
+
 test('整个方案金额等于选项笛卡尔积注数乘固定2元', () => {
   const result = schemePrizeRange([
     {options:[{market:'spf',pick:'h',odd:1.8},{market:'spf',pick:'d',odd:3.2}]},
