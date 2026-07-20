@@ -74,7 +74,7 @@ function renderMatches(){
 }
 function matchCard(m){
   const d=draftFor(m.id),summary=[];
-  if(d.spf.length) summary.push(`胜平负 ${d.spf.map(x=>pickLabel('spf',x)).join('/')}`);
+  if(d.spf.length) summary.push(d.spf.map(x=>pickLabel('spf',x)).join('/'));
   if(d.hhad.length) summary.push(`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`);
   if(d.goals.length) summary.push(`进球 ${d.goals.join('/')}`);
   if(d.scores) summary.push(`比分 ${d.scores}`);
@@ -235,4 +235,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260720-brand1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260720-brand2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

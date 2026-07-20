@@ -39,6 +39,14 @@ test('比赛卡片采用两行紧凑布局',()=>{
   assert.match(css,/\.match-detail-line/);
 });
 
+test('比赛卡片的已选胜平负标签只显示具体选择',()=>{
+  assert.match(app,/if\(d\.spf\.length\) summary\.push\(d\.spf\.map\(x=>pickLabel\('spf',x\)\)\.join\('\/'\)\)/);
+  assert.doesNotMatch(app,/summary\.push\(`胜平负 /);
+  assert.match(app,/<div class="pick-group"><h4>胜平负<\/h4>/);
+  assert.match(app,/function marketLabel\(market\)\{return \{spf:'胜平负'/);
+  assert.match(app,/\{x:588,w:120,l:'胜平负'\}/);
+});
+
 test('紧凑卡片保留完整队名提示并限制标签区域溢出',()=>{
   assert.match(app,/class="compact-team" title="\$\{esc\(m\.home\)\}"/);
   assert.match(app,/class="compact-team" title="\$\{esc\(m\.away\)\}"/);
@@ -70,12 +78,12 @@ test('夸克海报预览失败时回退Canvas',()=>{
 });
 
 test('发布缓存版本在应用外壳中保持一致',()=>{
-  const release='20260720-brand1';
+  const release='20260720-brand2';
   for(const asset of ['styles.css','combo-utils.js','scan-utils.js','app.js']){
     const escapedAsset=asset.replace('.','\\.');
     assert.match(html,new RegExp(`${escapedAsset}\\?v=${release}`));
     assert.match(sw,new RegExp(`${escapedAsset}\\?v=${release}`));
   }
   assert.match(app,new RegExp(`sw\\.js\\?v=${release}`));
-  assert.match(sw,/football-workbench-v12/);
+  assert.match(sw,/football-workbench-v13/);
 });
