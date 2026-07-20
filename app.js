@@ -194,7 +194,7 @@ function drawScanPoster(){
   canvas.width=width;canvas.height=height;
   const bg=ctx.createLinearGradient(0,0,0,height);bg.addColorStop(0,'#061528');bg.addColorStop(.32,'#092a36');bg.addColorStop(1,'#053224');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
   ctx.save();ctx.globalAlpha=.12;ctx.strokeStyle='#79d8ff';ctx.lineWidth=3;for(let i=-300;i<1500;i+=170){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i+440,350);ctx.stroke()}ctx.beginPath();ctx.arc(930,125,150,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(930,125,86,0,Math.PI*2);ctx.stroke();ctx.restore();
-  ctx.fillStyle='#ff6f3d';ctx.font='900 58px sans-serif';ctx.fillText('今日足球',42,88);ctx.fillStyle='#f6c851';ctx.font='700 28px sans-serif';ctx.fillText(`${fmtDate(state.activeDate)} ${weekday(state.activeDate)}`,850,78);
+  ctx.fillStyle='#ff6f3d';ctx.font='900 58px sans-serif';ctx.fillText('老花今日',42,88);ctx.fillStyle='#f6c851';ctx.font='700 28px sans-serif';ctx.fillText(`${fmtDate(state.activeDate)} ${weekday(state.activeDate)}`,850,78);
   ctx.fillStyle='#fff';ctx.font='900 78px sans-serif';ctx.fillText('全部扫盘推荐',42,190);ctx.fillStyle='#7ed6ff';ctx.font='800 30px sans-serif';ctx.fillText('综合研究一览',46,242);
   ctx.fillStyle='rgba(255,255,255,.08)';roundRect(ctx,42,278,1116,70,18);ctx.fillStyle='#dce9f6';ctx.font='700 24px sans-serif';ctx.fillText(state.settings.author||'足球研究员',68,322);ctx.textAlign='right';ctx.fillStyle=edited===rows.length?'#67e2ae':'#f6c851';ctx.fillText(`已研究 ${edited} / 共 ${rows.length} 场`,1130,322);ctx.textAlign='left';
   const cols=[{x:42,w:72,l:'编号'},{x:114,w:92,l:'时间'},{x:206,w:100,l:'赛事'},{x:306,w:282,l:'主队 VS 客队'},{x:588,w:120,l:'胜平负'},{x:708,w:160,l:'让球'},{x:868,w:132,l:'总进球'},{x:1000,w:158,l:'比分'}];
@@ -235,4 +235,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260720-compact1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260720-brand1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

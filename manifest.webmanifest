@@ -1,6 +1,6 @@
 {
-  "name": "足球研究工作台",
-  "short_name": "足球研究",
+  "name": "老花鉴足",
+  "short_name": "老花鉴足",
   "description": "本地优先的足球比赛研究与方案制作工具",
   "start_url": "./",
   "display": "standalone",
