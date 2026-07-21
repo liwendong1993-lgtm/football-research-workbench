@@ -3,3 +3,31 @@
 
 /* Compact mobile research list */
 .topbar{padding:12px 16px 8px}.topbar .eyebrow{font-size:9px}.topbar h1{font-size:19px}.topbar .icon-btn{width:36px;height:36px;border-radius:11px;font-size:20px}.hero-card{padding:9px 12px;border-radius:14px}.hero-summary-line{width:100%;display:flex;align-items:center;gap:9px;white-space:nowrap;overflow:hidden;font-size:12px}.hero-sync{display:flex;align-items:center;color:var(--muted)}.hero-summary-line .live-dot{width:6px;height:6px;margin-right:6px}.hero-summary-line>strong{color:var(--text);font-size:13px}.hero-progress{margin-left:auto;color:var(--muted)}.hero-progress strong{color:var(--gold);font-size:14px}.date-strip{padding:10px 1px 7px}.date-pill{padding:7px 10px;border-radius:12px;font-size:12px}.toolbar{margin:1px 0 7px}.segmented button{padding:6px 9px}.match-list{gap:5px;grid-template-columns:1fr!important}.match-card{padding:8px 9px;border-radius:12px;min-width:0}.match-line{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto minmax(0,1fr) auto;align-items:center;gap:5px;min-width:0}.match-line .league{max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 5px;border-radius:5px;font-size:10px}.match-line .match-no{font-size:10px;white-space:nowrap}.compact-team{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;text-align:center}.match-line .vs{font-size:8px}.match-line .match-time{margin:0;white-space:nowrap;font-size:9px}.match-detail-line{display:flex;align-items:center;gap:7px;min-width:0;margin-top:6px}.odds-inline{display:flex;align-items:center;gap:7px;flex:none;padding:3px 6px;border-radius:7px;background:#101f32;color:var(--muted);font-size:10px;white-space:nowrap}.odds-inline b{color:var(--text);font-size:11px}.match-detail-line .pick-summary{min-width:0;flex:1;flex-wrap:nowrap;overflow-x:auto;margin:0;gap:4px;scrollbar-width:none}.match-detail-line .tag{padding:2px 5px;border-radius:6px;font-size:9px;white-space:nowrap}.combo-basic-fields{display:grid;grid-template-columns:minmax(0,1fr) 100px;gap:10px}.combo-stake-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:stretch;margin-top:12px}.multiple-field{display:flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;color:var(--muted);white-space:nowrap}.multiple-field input{width:62px;background:#091524;color:var(--gold);border:1px solid var(--line);border-radius:8px;padding:7px 5px;text-align:center;font:800 16px inherit}.combo-stake-row .combo-cost{margin:0}.combo-calc-note{margin-top:7px}.combo-calc-note.error{color:#ff8b86}@media(max-width:420px){.page{padding-left:10px;padding-right:10px}.hero-summary-line{gap:7px;font-size:11px}.hero-summary-line>strong{font-size:12px}.match-line{gap:4px}.compact-team{font-size:12px}.match-line .match-time{font-size:8px}.odds-inline{gap:5px;padding-left:5px;padding-right:5px}}
+
+/* Review page */
+.review-list{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+.review-day-card{background:linear-gradient(160deg,#12233a,#0d1a2b);border:1px solid var(--line);border-radius:16px;padding:12px}
+.review-day-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+.review-day-head h3{margin:0 0 4px;font-size:17px}
+.review-day-meta{color:var(--muted);font-size:12px;margin:0}
+.review-day-head .primary.small{flex:none;white-space:nowrap}
+.review-match-list{display:flex;flex-direction:column;gap:6px}
+.review-match-card{padding:9px 10px;border-radius:12px;border:1px solid var(--line);background:#0b1728;cursor:pointer}
+.review-match-card.hit-card{border-color:rgba(255,70,70,.85);box-shadow:0 0 0 1px rgba(255,70,70,.35),0 8px 24px rgba(160,0,0,.18);background:linear-gradient(135deg,rgba(90,12,18,.55),#120b14 55%)}
+.review-match-top{display:flex;align-items:center;gap:6px;min-width:0}
+.review-match-top .league{max-width:58px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:#9eb4cf}
+.review-match-top .match-no{font-size:10px;color:var(--muted)}
+.review-match-top .teams{flex:1;min-width:0;font-weight:800;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review-score{flex:none;font-weight:900;color:#fff;font-size:14px;min-width:42px;text-align:right}
+.review-match-card.hit-card .review-score{color:#ff6b6b}
+.review-status{font-size:10px;color:var(--muted)}
+.review-match-bottom{display:flex;align-items:center;gap:6px;margin-top:6px;min-width:0}
+.review-match-bottom .pick-summary{flex:1;min-width:0;display:flex;gap:4px;overflow:x auto;scrollbar-width:none}
+.review-match-bottom .tag.hit{background:rgba(255,70,70,.18);color:#ff7d7d;border:1px solid rgba(255,90,90,.45)}
+.pick-btn.hit, .pick-btn.selected.hit{border-color:#ff4d4f!important;background:linear-gradient(180deg,#d7141f,#a40d16)!important;color:#fff!important;box-shadow:0 0 0 1px rgba(255,90,90,.35)}
+.pick-btn.hit em{color:rgba(255,255,255,.9)!important}
+.score-pick-item.hit{border-color:rgba(255,80,80,.7);background:rgba(160,20,30,.22)}
+.score-pick-item.hit strong{color:#ff7d7d}
+.review-empty{color:var(--muted);font-size:13px;padding:8px 2px}
+.dialog-score-badge{display:inline-flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--muted)}
+.dialog-score-badge b{color:#ff7d7d;font-size:16px}

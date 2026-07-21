@@ -9,7 +9,7 @@
   <title>老花鉴足</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" />
-  <link rel="stylesheet" href="styles.css?v=20260721-sync1" />
+  <link rel="stylesheet" href="styles.css?v=20260721-review1" />
 </head>
 <body>
   <div class="app-shell">
@@ -55,13 +55,15 @@
           <p>生成图片前会保存当前赔率和编辑时间。图片仅用于展示个人足球研究观点。</p>
           <button class="primary full" id="scanPosterBtn">生成全部扫盘图</button>
           <button class="secondary full" id="posterBtn">生成详细研究长图</button>
-          <button class="secondary full" id="saveReportBtn">保存到历史记录</button>
         </div>
       </section>
 
-      <section class="page" id="historyPage">
-        <div class="section-heading"><div><p class="eyebrow">ARCHIVE</p><h2>历史记录</h2></div></div>
-        <div id="historyList" class="history-list"></div>
+      <section class="page" id="reviewPage">
+        <div class="section-heading">
+          <div><p class="eyebrow">MATCH REVIEW</p><h2>复盘</h2></div>
+        </div>
+        <p class="section-note">最近 3 天比赛。刷新后更新比分；完赛后对照研究选项，命中项标红。</p>
+        <div id="reviewList" class="review-list"></div>
       </section>
 
       <section class="page" id="settingsPage">
@@ -90,7 +92,7 @@
     <nav class="bottom-nav">
       <button class="active" data-page="todayPage"><span>⚽</span>今日</button>
       <button data-page="plansPage"><span>▦</span>方案</button>
-      <button data-page="historyPage"><span>◷</span>历史</button>
+      <button data-page="reviewPage"><span>◷</span>复盘</button>
       <button data-page="settingsPage"><span>⚙</span>设置</button>
     </nav>
   </div>
@@ -100,8 +102,9 @@
   <dialog id="manualDialog" class="sheet-dialog"><form method="dialog" id="manualForm"><div id="manualContent"></div></form></dialog>
   <div id="posterDialog" class="poster-dialog" hidden><div class="poster-backdrop" data-close-poster></div><div class="poster-modal"><div class="modal-head"><h3>微信长图预览</h3><button type="button" id="closePosterBtn" class="icon-btn">×</button></div><canvas id="posterCanvas" class="poster-source-canvas"></canvas><img id="posterImage" class="poster-image" hidden alt="方案图片预览，可长按保存" /><p id="posterSaveStatus" class="poster-save-status" aria-live="polite">安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。</p><button type="button" id="downloadPosterBtn" class="primary full">保存或分享PNG</button><button type="button" id="openPosterBtn" class="secondary full">打开大图 / 长按保存</button></div></div>
   <div class="toast" id="toast"></div>
-  <script src="combo-utils.js?v=20260721-sync1"></script>
-  <script src="scan-utils.js?v=20260721-sync1"></script>
-  <script src="app.js?v=20260721-sync1"></script>
+  <script src="combo-utils.js?v=20260721-review1"></script>
+  <script src="scan-utils.js?v=20260721-review1"></script>
+  <script src="review-utils.js?v=20260721-review1"></script>
+  <script src="app.js?v=20260721-review1"></script>
 </body>
 </html>

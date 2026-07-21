@@ -123,5 +123,5 @@
     return {legs:groups.length,tickets,minOdd,maxOdd,complete};
   }
 
-  return {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange,passTypeLabel};
+  return {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,optionWins,comboMetrics,schemePrizeRange,passTypeLabel};
 });
