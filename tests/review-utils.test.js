@@ -106,3 +106,14 @@ test('复盘扫盘行标记正确选项', () => {
   assert.equal(row.spf.find(x=>x.pick==='d').hit,false);
   assert.equal(row.scores[0].hit,true);
 });
+
+test('没有预测比分时复盘行比分不应视为比分命中', () => {
+  const row=formatReviewScanRow(
+    {num:'周一204',time:'01:00',league:'瑞超',home:'卡尔马',away:'马尔默',score:'2:2',matchResultStatus:'2',hhad:{goalLine:'-1'}},
+    {spf:['d'],hhad:[],goals:[],scores:''},
+    optionWins
+  );
+  assert.equal(row.anyHit,true);
+  assert.equal(row.scores.length,0);
+  assert.equal(row.finished&&row.scores.some(s=>s.hit),false);
+});

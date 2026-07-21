@@ -658,7 +658,7 @@ function drawReviewPoster(date){
     ctx.fillRect(30,y,1140,rowH-2);
     if(r.anyHit){ctx.fillStyle='#ff4d4f';ctx.fillRect(30,y,7,rowH-2)}
     if(!r.edited){ctx.fillStyle='rgba(10,8,10,.45)';ctx.fillRect(30,y,1140,rowH-2)}
-    const base=[{text:r.num,hit:false},{text:r.time,hit:false},{text:r.league,hit:false},{text:r.teams,hit:false,left:true},{text:r.score,hit:r.finished&&r.anyHit}];
+    const base=[{text:r.num,hit:false},{text:r.time,hit:false},{text:r.league,hit:false},{text:r.teams,hit:false,left:true},{text:r.score,hit:r.finished&&r.scores.some(s=>s.hit)}];
     base.forEach((item,j)=>{
       const c=cols[j];
       ctx.fillStyle=item.hit?'#ff6b6b':(r.edited?'#f3d6b3':'#8293a6');
@@ -714,4 +714,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review3',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review4',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
