@@ -15,13 +15,29 @@
   }
 
   function crsKeyForScore(score){
-    const special={'胜其他':'s1sh','平其他':'s1sd','负其他':'s1sa'};
+    // Official fixed-bonus API uses s-1sh/s-1sd/s-1sa for 胜其他/平其他/负其他.
+    const special={'胜其他':'s-1sh','平其他':'s-1sd','负其他':'s-1sa'};
     if(special[score]) return special[score];
     const m=String(score||'').match(/^(\d+):(\d+)$/);
     if(!m) return '';
     const normalized=`${Number(m[1])}:${Number(m[2])}`,fallback=scoreOddsLabel(normalized);
     if(fallback)return special[fallback];
     return `s${String(Number(m[1])).padStart(2,'0')}s${String(Number(m[2])).padStart(2,'0')}`;
+  }
+
+  function crsOddLookup(crs,scoreOrKey){
+    const pool=crs||{};
+    const key=/^s/.test(String(scoreOrKey||''))?String(scoreOrKey):crsKeyForScore(scoreOrKey);
+    if(!key) return 0;
+    const aliases={
+      's-1sh':['s-1sh','s1sh'],'s-1sd':['s-1sd','s1sd'],'s-1sa':['s-1sa','s1sa'],
+      's1sh':['s1sh','s-1sh'],'s1sd':['s1sd','s-1sd'],'s1sa':['s1sa','s-1sa']
+    };
+    for(const candidate of (aliases[key]||[key])){
+      const value=pool[candidate];
+      if(value!=null&&value!==''&&value!=='--'&&Number(value)>0) return Number(value);
+    }
+    return 0;
   }
 
   function splitOptionValue(value){
@@ -107,5 +123,5 @@
     return {legs:groups.length,tickets,minOdd,maxOdd,complete};
   }
 
-  return {parseScorePicks,crsKeyForScore,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange,passTypeLabel};
+  return {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,comboMetrics,schemePrizeRange,passTypeLabel};
 });

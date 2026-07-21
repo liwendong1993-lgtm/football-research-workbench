@@ -1,5 +1,5 @@
-const CACHE='football-workbench-v13';
-const ASSETS=['./','./index.html','./styles.css?v=20260720-brand2','./combo-utils.js?v=20260720-brand2','./scan-utils.js?v=20260720-brand2','./app.js?v=20260720-brand2','./manifest.webmanifest','./icon.svg'];
+const CACHE='football-workbench-v14';
+const ASSETS=['./','./index.html','./styles.css?v=20260721-sync1','./combo-utils.js?v=20260721-sync1','./scan-utils.js?v=20260721-sync1','./app.js?v=20260721-sync1','./manifest.webmanifest','./icon.svg'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
