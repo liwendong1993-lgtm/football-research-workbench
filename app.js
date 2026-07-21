@@ -6,7 +6,7 @@ const RESULT_URL=`${API_HOST}/getUniformMatchResultV1.qry`;
 const STORE_KEY='football-workbench-v1';
 const {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,optionWins,comboMetrics,schemePrizeRange,passTypeLabel}=ComboUtils;
 const {formatScanRow}=ScanUtils;
-const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore}=ReviewUtils;
+const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore,matchSaleDate,saleDateFromMatchNum}=ReviewUtils;
 const DEFAULT_STATE={matches:[],reviewMatches:[],drafts:{},combos:{},reports:[],activeDate:'',reviewDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:'',lastResultSync:''};
 let state=loadState();
 let activeFilter='all';
@@ -48,7 +48,10 @@ function applyResultToMatch(match,result){
     match.goalLine=match.goalLine||result.goalLine;
   }
   if(!match.matchDate&&result.matchDate) match.matchDate=result.matchDate;
-  if(!match.businessDate) match.businessDate=result.businessDate||result.matchDate||match.matchDate||'';
+  // 开售日以编号回推为准，避免赛果接口的自然日覆盖周一场
+  const saleDate=matchSaleDate({...match,...result,num:match.num||result.num,matchDate:result.matchDate||match.matchDate,businessDate:result.businessDate||match.businessDate,fromResult:match.fromResult||result.fromResult});
+  if(saleDate) match.businessDate=saleDate;
+  else if(!match.businessDate) match.businessDate=result.businessDate||result.matchDate||match.matchDate||'';
   return match;
 }
 function matchDayKey(match){return match?.businessDate||match?.matchDate||''}
@@ -68,19 +71,22 @@ function saleMatches(){
 function matchesForReviewDate(date){
   const map=new Map();
   saleMatches().forEach(m=>{
-    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
-    if(days.has(date)) map.set(m.id,{...m});
+    if(matchSaleDate(m)===date) map.set(m.id,{...m,businessDate:matchSaleDate(m)});
   });
   (state.reviewMatches||[]).forEach(m=>{
-    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
-    if(!days.has(date)) return;
+    const saleDate=matchSaleDate(m);
+    if(saleDate!==date) return;
     const existing=map.get(m.id);
-    if(existing) applyResultToMatch(existing,m);
-    else map.set(m.id,{...m});
+    if(existing){
+      applyResultToMatch(existing,m);
+      existing.businessDate=saleDate;
+    }else{
+      map.set(m.id,{...m,businessDate:saleDate});
+    }
   });
   return [...map.values()].sort((a,b)=>{
-    const ta=`${a.matchDate||''} ${a.time||''}`,tb=`${b.matchDate||''} ${b.time||''}`;
-    return ta.localeCompare(tb)||String(a.num||'').localeCompare(String(b.num||''));
+    const ta=`${a.num||''} ${a.matchDate||''} ${a.time||''}`,tb=`${b.num||''} ${b.matchDate||''} ${b.time||''}`;
+    return ta.localeCompare(tb,'zh-CN');
   });
 }
 function preserveMatchMeta(previous=[],nextList=[]){
@@ -122,16 +128,19 @@ async function fetchMatchResults(){
     const sale=saleById.get(result.matchId);
     if(sale) applyResultToMatch(sale,result);
     const existing=reviewById.get(result.matchId);
+    const saleDate=matchSaleDate({...result,num:result.num||sale?.num,matchDate:result.matchDate,businessDate:result.businessDate,fromResult:true});
     if(existing){
       applyResultToMatch(existing,result);
       existing.num=existing.num||result.num;
       existing.league=existing.league||result.league;
       existing.home=existing.home||result.home;
       existing.away=existing.away||result.away;
+      existing.businessDate=saleDate||existing.businessDate;
+      existing.matchDate=result.matchDate||existing.matchDate;
     }else{
       const created={
         id:result.matchId,
-        businessDate:result.businessDate||result.matchDate,
+        businessDate:saleDate||result.businessDate||result.matchDate,
         matchDate:result.matchDate||result.businessDate,
         time:sale?.time||'',
         num:result.num||sale?.num||'',
@@ -146,21 +155,24 @@ async function fetchMatchResults(){
         fromResult:true
       };
       applyResultToMatch(created,result);
+      created.businessDate=saleDate||created.businessDate;
       reviewById.set(created.id,created);
     }
   });
-  // 也把最近3天在售比赛写入复盘池，方便未完赛/进行中对照
+  // 也把最近3天开售比赛写入复盘池，方便未完赛/进行中对照
   saleMatches().forEach(m=>{
-    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
-    if(![...days].some(d=>dates.includes(d))) return;
+    const saleDate=matchSaleDate(m);
+    if(!dates.includes(saleDate)) return;
     if(reviewById.has(m.id)){
       const target=reviewById.get(m.id);
       ['had','hhad','ttg','crs','time','num','league','home','away'].forEach(key=>{
         if(m[key]!=null) target[key]=typeof m[key]==='object'?{...m[key]}:m[key];
       });
+      target.businessDate=saleDate;
+      target.matchDate=m.matchDate||target.matchDate;
       if(m.score) applyResultToMatch(target,m);
     }else{
-      reviewById.set(m.id,{...deepClone(m),fromResult:false});
+      reviewById.set(m.id,{...deepClone(m),businessDate:saleDate,fromResult:false});
     }
   });
   state.reviewMatches=[...reviewById.values()];
@@ -171,17 +183,23 @@ function syncReviewPoolFromSale(){
   const dates=new Set(reviewDateKeys());
   const reviewById=new Map((state.reviewMatches||[]).map(m=>[m.id,m]));
   saleMatches().forEach(m=>{
-    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
-    if(![...days].some(d=>dates.has(d))) return;
+    const saleDate=matchSaleDate(m);
+    if(!dates.has(saleDate)) return;
     if(reviewById.has(m.id)){
       const target=reviewById.get(m.id);
-      ['had','hhad','ttg','crs','time','num','league','home','away','businessDate','matchDate'].forEach(key=>{
+      ['had','hhad','ttg','crs','time','num','league','home','away','matchDate'].forEach(key=>{
         if(m[key]!=null) target[key]=typeof m[key]==='object'?{...m[key]}:m[key];
       });
+      target.businessDate=saleDate;
       if(m.score||m.sectionsNo999) applyResultToMatch(target,m);
     }else{
-      reviewById.set(m.id,{...deepClone(m),fromResult:false});
+      reviewById.set(m.id,{...deepClone(m),businessDate:saleDate,fromResult:false});
     }
+  });
+  // 修正历史赛果池里错误的自然日 businessDate
+  [...reviewById.values()].forEach(m=>{
+    const saleDate=matchSaleDate(m);
+    if(saleDate) m.businessDate=saleDate;
   });
   state.reviewMatches=[...reviewById.values()];
 }
@@ -696,4 +714,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review3',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

@@ -30,6 +30,30 @@
     for(let i=days-1;i>=0;i-=1) keys.push(addDays(end,-i));
     return keys;
   }
+  // 竞彩编号里的“周一/周二…”对应开售日，不是自然开赛日。
+  const WEEKDAY_INDEX={'周日':0,'周一':1,'周二':2,'周三':3,'周四':4,'周五':5,'周六':6};
+  function saleDateFromMatchNum(num,matchDate){
+    const label=String(num||'').match(/周[日一二三四五六]/)?.[0];
+    const base=toDateKey(matchDate||'');
+    if(!label||!base||!(label in WEEKDAY_INDEX)) return base||'';
+    const target=WEEKDAY_INDEX[label];
+    const d=new Date(`${base}T12:00:00`);
+    for(let i=0;i<7;i+=1){
+      const candidate=new Date(d);
+      candidate.setDate(d.getDate()-i);
+      if(candidate.getDay()===target) return toDateKey(candidate);
+    }
+    return base;
+  }
+  function matchSaleDate(match={}){
+    const num=match.num||match.matchNumStr||'';
+    const matchDate=match.matchDate||'';
+    const fromNum=saleDateFromMatchNum(num,matchDate||match.businessDate);
+    // 在售列表通常已带正确 businessDate；赛果接口常把 matchDate 当成 businessDate，需按编号回推。
+    if(match.businessDate&&fromNum&&match.businessDate!==fromNum&&/周[日一二三四五六]/.test(num)) return fromNum;
+    if(match.businessDate&&!match.fromResult) return match.businessDate;
+    return fromNum||match.businessDate||matchDate||'';
+  }
   function parseScore(value){
     const m=String(value||'').trim().match(/^(\d+)\s*[:：-]\s*(\d+)$/);
     if(!m) return null;
@@ -57,11 +81,14 @@
     const score=parseScore(raw.sectionsNo999||raw.score||raw.finalScore);
     const half=parseScore(raw.sectionsNo1||raw.halfScore);
     const winFlag=String(raw.winFlag||'').toUpperCase();
+    const num=raw.matchNumStr||raw.num||'';
+    const matchDate=raw.matchDate||'';
+    const businessDate=saleDateFromMatchNum(num,matchDate||raw.businessDate)||raw.businessDate||matchDate||'';
     return {
       matchId:String(raw.matchId||raw.id||''),
-      matchDate:raw.matchDate||raw.businessDate||'',
-      businessDate:raw.businessDate||raw.matchDate||'',
-      num:raw.matchNumStr||raw.num||'',
+      matchDate:matchDate||businessDate||'',
+      businessDate,
+      num,
       league:raw.leagueNameAbbr||raw.leagueAbbName||raw.leagueName||raw.league||'',
       home:raw.homeTeam||raw.allHomeTeam||raw.home||'',
       away:raw.awayTeam||raw.allAwayTeam||raw.away||'',
@@ -72,7 +99,8 @@
       matchResultStatus:String(raw.matchResultStatus??raw.resultStatus??''),
       poolStatus:raw.poolStatus||'',
       sectionsNo999:raw.sectionsNo999||score?.text||'',
-      sectionsNo1:raw.sectionsNo1||half?.text||''
+      sectionsNo1:raw.sectionsNo1||half?.text||'',
+      fromResult:true
     };
   }
   function evaluateDraft(match={},draft={},optionWins){
@@ -177,7 +205,8 @@
   }
 
   return {
-    toDateKey,chinaDateKey,addDays,recentDateKeys,parseScore,isFinishedResult,resultStatusLabel,
+    toDateKey,chinaDateKey,addDays,recentDateKeys,saleDateFromMatchNum,matchSaleDate,
+    parseScore,isFinishedResult,resultStatusLabel,
     normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,
     SPF_LABELS,HHAD_LABELS
   };

@@ -16,6 +16,21 @@ test('复盘日期默认按北京时间，避免海外时区少一天', () => {
   assert.equal(chinaDateKey(new Date('2026-07-21T01:30:00Z')), '2026-07-21');
 });
 
+test('竞彩编号按开售日回推，不按自然开赛日', () => {
+  const { saleDateFromMatchNum, matchSaleDate, normalizeResultRecord } = require('../review-utils.js');
+  // 2026-07-21 是周二；周一204 应归到 7月20日
+  assert.equal(saleDateFromMatchNum('周一204', '2026-07-21'), '2026-07-20');
+  assert.equal(saleDateFromMatchNum('周二201', '2026-07-21'), '2026-07-21');
+  assert.equal(saleDateFromMatchNum('周日104', '2026-07-20'), '2026-07-19');
+  const row=normalizeResultRecord({
+    matchId:1,matchDate:'2026-07-21',matchNumStr:'周一204',homeTeam:'卡尔马',awayTeam:'马尔默',
+    sectionsNo999:'2:2',matchResultStatus:'2'
+  });
+  assert.equal(row.businessDate,'2026-07-20');
+  assert.equal(row.matchDate,'2026-07-21');
+  assert.equal(matchSaleDate({num:'周一203',matchDate:'2026-07-21',businessDate:'2026-07-21',fromResult:true}),'2026-07-20');
+});
+
 test('比分解析支持冒号和中文冒号', () => {
   assert.deepEqual(parseScore('2:1'), {home:2,away:1,text:'2:1'});
   assert.deepEqual(parseScore('0：0'), {home:0,away:0,text:'0:0'});
