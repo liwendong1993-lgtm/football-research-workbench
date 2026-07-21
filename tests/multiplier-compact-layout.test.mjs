@@ -40,13 +40,14 @@ test('比赛卡片采用两行紧凑布局',()=>{
 });
 
 test('比赛卡片的已选胜平负标签只显示具体选择',()=>{
-  assert.match(app,/if\(d\.spf\.length\) summary\.push\(\.\.\.d\.spf\.map\(x=>\(\{text:pickLabel\('spf',x\)/);
+  assert.match(app,/if\(d\.spf\.length\) summary\.push\(d\.spf\.map\(x=>pickLabel\('spf',x\)\)\.join\('\/'\)\)/);
   assert.doesNotMatch(app,/summary\.push\(`胜平负 /);
   assert.match(app,/<div class="pick-group"><h4>胜平负<\/h4>/);
   assert.match(app,/function marketLabel\(market\)\{return \{spf:'胜平负'/);
   assert.match(app,/\{x:588,w:120,l:'胜平负'\}/);
   assert.match(html,/复盘/);
-  assert.match(app,/function renderReview\(/);
+  assert.match(html,/id="reviewDateStrip"/);
+  assert.match(app,/function reviewMatchCard\(/);
   assert.match(app,/getUniformMatchResultV1\.qry/);
 });
 
@@ -81,12 +82,12 @@ test('夸克海报预览失败时回退Canvas',()=>{
 });
 
 test('发布缓存版本在应用外壳中保持一致',()=>{
-  const release='20260721-review1';
+  const release='20260721-review2';
   for(const asset of ['styles.css','combo-utils.js','scan-utils.js','review-utils.js','app.js']){
     const escapedAsset=asset.replace('.','\\.');
     assert.match(html,new RegExp(`${escapedAsset}\\?v=${release}`));
     assert.match(sw,new RegExp(`${escapedAsset}\\?v=${release}`));
   }
   assert.match(app,new RegExp(`sw\\.js\\?v=${release}`));
-  assert.match(sw,/football-workbench-v15/);
+  assert.match(sw,/football-workbench-v16/);
 });

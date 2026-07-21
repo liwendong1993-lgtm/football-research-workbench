@@ -9,7 +9,7 @@
   <title>老花鉴足</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" />
-  <link rel="stylesheet" href="styles.css?v=20260721-review1" />
+  <link rel="stylesheet" href="styles.css?v=20260721-review2" />
 </head>
 <body>
   <div class="app-shell">
@@ -59,11 +59,19 @@
       </section>
 
       <section class="page" id="reviewPage">
-        <div class="section-heading">
-          <div><p class="eyebrow">MATCH REVIEW</p><h2>复盘</h2></div>
+        <div class="hero-card">
+          <div class="hero-summary-line">
+            <span class="hero-sync"><span class="live-dot"></span><span id="reviewMeta">最近3天复盘</span></span>
+            <strong id="reviewHeroTitle">复盘</strong>
+            <span class="hero-progress">研究 <strong id="reviewEditedCount">0</strong>/<span id="reviewTotalCount">0</span> · 命中 <strong id="reviewHitCount">0</strong></span>
+          </div>
         </div>
-        <p class="section-note">最近 3 天比赛。刷新后更新比分；完赛后对照研究选项，命中项标红。</p>
-        <div id="reviewList" class="review-list"></div>
+        <div class="date-strip" id="reviewDateStrip"></div>
+        <div class="toolbar">
+          <p class="section-note review-toolbar-note">完赛后命中标红；刷新可更新比分。</p>
+          <button class="primary small" id="reviewPosterBtn" type="button">生成复盘图</button>
+        </div>
+        <div class="match-list" id="reviewMatchList"></div>
       </section>
 
       <section class="page" id="settingsPage">
@@ -102,9 +110,9 @@
   <dialog id="manualDialog" class="sheet-dialog"><form method="dialog" id="manualForm"><div id="manualContent"></div></form></dialog>
   <div id="posterDialog" class="poster-dialog" hidden><div class="poster-backdrop" data-close-poster></div><div class="poster-modal"><div class="modal-head"><h3>微信长图预览</h3><button type="button" id="closePosterBtn" class="icon-btn">×</button></div><canvas id="posterCanvas" class="poster-source-canvas"></canvas><img id="posterImage" class="poster-image" hidden alt="方案图片预览，可长按保存" /><p id="posterSaveStatus" class="poster-save-status" aria-live="polite">安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。</p><button type="button" id="downloadPosterBtn" class="primary full">保存或分享PNG</button><button type="button" id="openPosterBtn" class="secondary full">打开大图 / 长按保存</button></div></div>
   <div class="toast" id="toast"></div>
-  <script src="combo-utils.js?v=20260721-review1"></script>
-  <script src="scan-utils.js?v=20260721-review1"></script>
-  <script src="review-utils.js?v=20260721-review1"></script>
-  <script src="app.js?v=20260721-review1"></script>
+  <script src="combo-utils.js?v=20260721-review2"></script>
+  <script src="scan-utils.js?v=20260721-review2"></script>
+  <script src="review-utils.js?v=20260721-review2"></script>
+  <script src="app.js?v=20260721-review2"></script>
 </body>
 </html>

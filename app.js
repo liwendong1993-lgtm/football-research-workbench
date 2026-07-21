@@ -7,7 +7,7 @@ const STORE_KEY='football-workbench-v1';
 const {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,optionWins,comboMetrics,schemePrizeRange,passTypeLabel}=ComboUtils;
 const {formatScanRow}=ScanUtils;
 const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore}=ReviewUtils;
-const DEFAULT_STATE={matches:[],drafts:{},combos:{},reports:[],activeDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:'',lastResultSync:''};
+const DEFAULT_STATE={matches:[],reviewMatches:[],drafts:{},combos:{},reports:[],activeDate:'',reviewDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:'',lastResultSync:''};
 let state=loadState();
 let activeFilter='all';
 let editingId=null;
@@ -53,11 +53,30 @@ function applyResultToMatch(match,result){
 }
 function matchDayKey(match){return match?.businessDate||match?.matchDate||''}
 function reviewDateKeys(){return recentDateKeys(3)}
+function ensureReviewDate(){
+  const dates=reviewDateKeys();
+  if(!state.reviewDate||!dates.includes(state.reviewDate)) state.reviewDate=dates[dates.length-1];
+  return state.reviewDate;
+}
+function findMatch(id){
+  return state.matches.find(m=>m.id===id)||(state.reviewMatches||[]).find(m=>m.id===id);
+}
+function saleMatches(){
+  // 今日页只展示在售/手动比赛，不把复盘历史赛果混进来。
+  return (state.matches||[]).filter(m=>!m.fromResult);
+}
 function matchesForReviewDate(date){
   const map=new Map();
-  state.matches.forEach(m=>{
+  saleMatches().forEach(m=>{
     const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
-    if(days.has(date)) map.set(m.id,m);
+    if(days.has(date)) map.set(m.id,{...m});
+  });
+  (state.reviewMatches||[]).forEach(m=>{
+    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
+    if(!days.has(date)) return;
+    const existing=map.get(m.id);
+    if(existing) applyResultToMatch(existing,m);
+    else map.set(m.id,{...m});
   });
   return [...map.values()].sort((a,b)=>{
     const ta=`${a.matchDate||''} ${a.time||''}`,tb=`${b.matchDate||''} ${b.time||''}`;
@@ -73,17 +92,13 @@ function preserveMatchMeta(previous=[],nextList=[]){
     ['score','halfScore','sectionsNo999','sectionsNo1','matchResultStatus','winFlag','poolStatus','goalLine'].forEach(key=>{
       if(prev[key]!=null&&prev[key]!=='') next[key]=prev[key];
     });
-    if(prev.hhad?.goalLine&&!next.hhad?.goalLine){
-      next.hhad={...(next.hhad||{}),goalLine:prev.hhad.goalLine};
-    }
+    if(prev.hhad?.goalLine&&!next.hhad?.goalLine) next.hhad={...(next.hhad||{}),goalLine:prev.hhad.goalLine};
     return next;
   });
-  const keepDays=new Set(reviewDateKeys());
+  // 今日页仅保留手动添加且不在新列表中的场次
   previous.forEach(prev=>{
-    if(merged.some(m=>m.id===prev.id)) return;
-    if(prev.manual||prev.score||prev.sectionsNo999||keepDays.has(prev.businessDate)||keepDays.has(prev.matchDate)){
-      merged.push(prev);
-    }
+    if(!prev.manual||merged.some(m=>m.id===prev.id)) return;
+    merged.push(prev);
   });
   return merged;
 }
@@ -101,31 +116,74 @@ async function fetchMatchResults(){
     pageNo+=1;
   }
   const normalized=records.map(normalizeResultRecord).filter(r=>r.matchId);
-  const byId=new Map(state.matches.map(m=>[m.id,m]));
+  const saleById=new Map(state.matches.map(m=>[m.id,m]));
+  const reviewById=new Map((state.reviewMatches||[]).map(m=>[m.id,m]));
   normalized.forEach(result=>{
-    const existing=byId.get(result.matchId);
+    const sale=saleById.get(result.matchId);
+    if(sale) applyResultToMatch(sale,result);
+    const existing=reviewById.get(result.matchId);
     if(existing){
       applyResultToMatch(existing,result);
+      existing.num=existing.num||result.num;
+      existing.league=existing.league||result.league;
+      existing.home=existing.home||result.home;
+      existing.away=existing.away||result.away;
     }else{
       const created={
         id:result.matchId,
         businessDate:result.businessDate||result.matchDate,
         matchDate:result.matchDate||result.businessDate,
-        time:'',
-        num:result.num||'',
-        league:result.league||'足球',
-        home:result.home||'',
-        away:result.away||'',
-        had:{},hhad:{goalLine:result.goalLine||''},ttg:{},crs:{},
-        manual:false,fromResult:true
+        time:sale?.time||'',
+        num:result.num||sale?.num||'',
+        league:result.league||sale?.league||'足球',
+        home:result.home||sale?.home||'',
+        away:result.away||sale?.away||'',
+        had:sale?.had?{...sale.had}:{},
+        hhad:{goalLine:result.goalLine||sale?.hhad?.goalLine||'',...(sale?.hhad||{})},
+        ttg:sale?.ttg?{...sale.ttg}:{},
+        crs:sale?.crs?{...sale.crs}:{},
+        manual:false,
+        fromResult:true
       };
       applyResultToMatch(created,result);
-      state.matches.push(created);
-      byId.set(created.id,created);
+      reviewById.set(created.id,created);
     }
   });
+  // 也把最近3天在售比赛写入复盘池，方便未完赛/进行中对照
+  saleMatches().forEach(m=>{
+    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
+    if(![...days].some(d=>dates.includes(d))) return;
+    if(reviewById.has(m.id)){
+      const target=reviewById.get(m.id);
+      ['had','hhad','ttg','crs','time','num','league','home','away'].forEach(key=>{
+        if(m[key]!=null) target[key]=typeof m[key]==='object'?{...m[key]}:m[key];
+      });
+      if(m.score) applyResultToMatch(target,m);
+    }else{
+      reviewById.set(m.id,{...deepClone(m),fromResult:false});
+    }
+  });
+  state.reviewMatches=[...reviewById.values()];
   state.lastResultSync=new Date().toISOString();
   return normalized.length;
+}
+function syncReviewPoolFromSale(){
+  const dates=new Set(reviewDateKeys());
+  const reviewById=new Map((state.reviewMatches||[]).map(m=>[m.id,m]));
+  saleMatches().forEach(m=>{
+    const days=new Set([m.businessDate,m.matchDate].filter(Boolean));
+    if(![...days].some(d=>dates.has(d))) return;
+    if(reviewById.has(m.id)){
+      const target=reviewById.get(m.id);
+      ['had','hhad','ttg','crs','time','num','league','home','away','businessDate','matchDate'].forEach(key=>{
+        if(m[key]!=null) target[key]=typeof m[key]==='object'?{...m[key]}:m[key];
+      });
+      if(m.score||m.sectionsNo999) applyResultToMatch(target,m);
+    }else{
+      reviewById.set(m.id,{...deepClone(m),fromResult:false});
+    }
+  });
+  state.reviewMatches=[...reviewById.values()];
 }
 function pickOddsFields(source={}){
   const out={};
@@ -327,7 +385,7 @@ async function fetchMatches(show=true){
       list=await fetchLegacyCalculatorMatches();
       source='calculator';
     }
-    const previous=state.matches.slice();
+    const previous=state.matches.slice().filter(m=>!m.fromResult);
     state.matches=preserveMatchMeta(previous,list);
     state.lastSync=new Date().toISOString();saveState();
     const withOdds=list.filter(m=>m.had?.h||m.hhad?.h||m.ttg?.s0||Object.keys(m.crs||{}).length).length;
@@ -338,19 +396,20 @@ async function fetchMatches(show=true){
       $('#dataStatus').textContent=`${list.length}场已同步`;
       if(show) toast(withOdds?`已同步 ${list.length} 场（${withOdds} 场含赔率）`:`已同步 ${list.length} 场比赛`);
     }
-    const dates=[...new Set(state.matches.map(m=>m.businessDate||m.matchDate).filter(Boolean))].sort();
-    if(!state.activeDate||!dates.includes(state.activeDate)) state.activeDate=dates.find(d=>reviewDateKeys().includes(d))||dates[dates.length-1]||new Date().toISOString().slice(0,10);
+    const dates=[...new Set(saleMatches().map(m=>m.businessDate).filter(Boolean))].sort();
+    if(!state.activeDate||!dates.includes(state.activeDate)) state.activeDate=dates[0]||new Date().toISOString().slice(0,10);
+    ensureReviewDate();
+    syncReviewPoolFromSale();
     renderAll();
     // Pull results after first paint so score refresh never blocks match list.
     try{
       const resultCount=await fetchMatchResults();
-      if(resultCount){
-        saveState();
-        $('#dataStatus').textContent=`${list.length||state.matches.length}场·赛果${resultCount}`;
-        renderAll();
-      }
+      saveState();
+      if(resultCount) $('#dataStatus').textContent=`${list.length||saleMatches().length}场·赛果${resultCount}`;
+      renderAll();
     }catch(resultError){
       console.warn('赛果同步失败',resultError);
+      syncReviewPoolFromSale();saveState();renderReview();
     }
   }catch(err){
     const localCount=state.matches.filter(m=>!m.manual).length;
@@ -362,12 +421,12 @@ async function fetchMatches(show=true){
 
 function renderAll(){renderDates();renderMatches();renderCombos();renderReview();renderSettings();}
 function renderDates(){
-  const dates=[...new Set(state.matches.map(m=>m.businessDate).filter(Boolean))].sort();
+  const dates=[...new Set(saleMatches().map(m=>m.businessDate).filter(Boolean))].sort();
   $('#dateStrip').innerHTML=dates.length?dates.map(d=>`<button class="date-pill ${d===state.activeDate?'active':''}" data-date="${d}">${weekday(d)} · ${fmtDate(d)}</button>`).join(''):'<span class="section-note">暂无在线比赛，可手动添加</span>';
   $('#heroTitle').textContent=state.activeDate?`${weekday(state.activeDate)} · ${fmtDate(state.activeDate)}`:'今日比赛';
 }
 function renderMatches(){
-  const all=state.matches.filter(m=>m.businessDate===state.activeDate);let list=all;
+  const all=saleMatches().filter(m=>m.businessDate===state.activeDate);let list=all;
   if(activeFilter==='edited') list=list.filter(m=>isEdited(draftFor(m.id)));
   if(activeFilter==='primary') list=list.filter(m=>draftFor(m.id).confidence==='主推');
   const edited=all.filter(m=>isEdited(draftFor(m.id))).length;
@@ -376,16 +435,28 @@ function renderMatches(){
   $$('.match-card').forEach(el=>el.addEventListener('click',()=>openEdit(el.dataset.id)));
 }
 function matchCard(m){
-  const d=draftFor(m.id),summary=[],hit=evaluateDraft(m,d,optionWins);
+  const d=draftFor(m.id),summary=[];
+  if(d.spf.length) summary.push(d.spf.map(x=>pickLabel('spf',x)).join('/'));
+  if(d.hhad.length) summary.push(`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`);
+  if(d.goals.length) summary.push(`进球 ${d.goals.join('/')}`);
+  if(d.scores) summary.push(`比分 ${d.scores}`);
+  if(d.confidence) summary.unshift(d.confidence);
+  return `<article class="match-card ${isEdited(d)?'edited':''} ${d.confidence==='主推'?'primary-card':''}" data-id="${m.id}">
+    <div class="match-line"><span class="league">${esc(m.league)}</span><span class="match-no">${esc(m.num)}</span><strong class="compact-team" title="${esc(m.home)}">${esc(m.home)}</strong><span class="vs">VS</span><strong class="compact-team" title="${esc(m.away)}">${esc(m.away)}</strong><span class="match-time">${esc((m.matchDate||'').slice(5))} ${esc(m.time)}</span></div>
+    <div class="match-detail-line"><div class="odds-inline"><span>胜 <b>${m.had?.h||'--'}</b></span><span>平 <b>${m.had?.d||'--'}</b></span><span>负 <b>${m.had?.a||'--'}</b></span></div><div class="pick-summary">${summary.length?summary.map((x,i)=>`<span class="tag ${i===0&&d.confidence==='主推'?'primary':''} ${d.confidence==='风险'?'risk':''}">${esc(x)}</span>`).join(''):'<span class="tag">点选研究</span>'}</div></div>
+  </article>`;
+}
+function reviewMatchCard(m){
+  const d=draftFor(m.id),hit=evaluateDraft(m,d,optionWins),summary=[];
   if(d.spf.length) summary.push(...d.spf.map(x=>({text:pickLabel('spf',x),hit:hit.detail.spf.some(i=>i.pick===x&&i.hit)})));
-  if(d.hhad.length) summary.push({text:`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`,hit:hit.detail.hhad.some(i=>i.hit)});
+  if(d.hhad.length) summary.push({text:`${m.hhad?.goalLine||m.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`,hit:hit.detail.hhad.some(i=>i.hit)});
   if(d.goals.length) summary.push(...d.goals.map(x=>({text:`进球${x}`,hit:hit.detail.goals.some(i=>i.pick===x&&i.hit)})));
   if(d.scores) summary.push(...parseScorePicks(d.scores).map(x=>({text:`比分${x}`,hit:hit.detail.scores.some(i=>i.pick===x&&i.hit)})));
   if(d.confidence) summary.unshift({text:d.confidence,hit:false});
   const scoreText=m.score||m.sectionsNo999||'';
-  return `<article class="match-card ${isEdited(d)?'edited':''} ${d.confidence==='主推'?'primary-card':''} ${hit.anyHit?'hit-card':''}" data-id="${m.id}">
-    <div class="match-line"><span class="league">${esc(m.league)}</span><span class="match-no">${esc(m.num)}</span><strong class="compact-team" title="${esc(m.home)}">${esc(m.home)}</strong><span class="vs">${scoreText?esc(scoreText):'VS'}</span><strong class="compact-team" title="${esc(m.away)}">${esc(m.away)}</strong><span class="match-time">${esc((m.matchDate||'').slice(5))} ${esc(m.time)}</span></div>
-    <div class="match-detail-line"><div class="odds-inline"><span>胜 <b>${m.had?.h||'--'}</b></span><span>平 <b>${m.had?.d||'--'}</b></span><span>负 <b>${m.had?.a||'--'}</b></span></div><div class="pick-summary">${summary.length?summary.map((x,i)=>`<span class="tag ${x.hit?'hit':''} ${i===0&&d.confidence==='主推'?'primary':''} ${d.confidence==='风险'?'risk':''}">${esc(x.text)}</span>`).join(''):'<span class="tag">点选研究</span>'}</div></div>
+  return `<article class="match-card ${isEdited(d)?'edited':''} ${d.confidence==='主推'?'primary-card':''} ${hit.anyHit?'hit-card':''}" data-review-match="${m.id}">
+    <div class="match-line"><span class="league">${esc(m.league)}</span><span class="match-no">${esc(m.num)}</span><strong class="compact-team" title="${esc(m.home)}">${esc(m.home)}</strong><span class="vs">${scoreText?esc(scoreText):'VS'}</span><strong class="compact-team" title="${esc(m.away)}">${esc(m.away)}</strong><span class="match-time">${esc((m.matchDate||'').slice(5))} ${esc(m.time||'')}</span></div>
+    <div class="match-detail-line"><div class="odds-inline"><span>${esc(resultStatusLabel(m))}</span>${hit.finished&&hit.anyHit?'<span><b class="hit-text">命中</b></span>':''}</div><div class="pick-summary">${summary.length?summary.map(x=>`<span class="tag ${x.hit?'hit':''}">${esc(x.text)}</span>`).join(''):'<span class="tag">未研究</span>'}</div></div>
   </article>`;
 }
 
@@ -394,15 +465,17 @@ function scoreOddMeta(match,score){const category=scoreOddsLabel(score),key=crsK
 function scorePickHtml(match,score,hit=false){const meta=scoreOddMeta(match,score),binding=meta.category?`<small>自动绑定 ${esc(meta.category)}</small>`:'<small>固定比分</small>';return `<div class="score-pick-item ${hit?'hit':''}"><div><strong>${esc(score)}</strong>${binding}</div><span class="score-odd">赔率 ${meta.odd?meta.odd.toFixed(2):'--'}</span><button type="button" data-remove-score="${esc(score)}" aria-label="删除比分">×</button></div>`}
 function pickButtons(market,items,selected,hitSet){return items.map(([v,label,odd])=>`<button type="button" class="pick-btn ${selected.includes(v)?'selected':''} ${hitSet?.has(`${market}:${v}`)?'hit':''}" data-market="${market}" data-value="${v}">${label}${odd?`<em>${odd}</em>`:''}</button>`).join('')}
 function openEdit(id){
-  editingId=id;const m=state.matches.find(x=>x.id===id),d=deepClone(draftFor(id)),scorePoolKeys=new Set();let scorePicks=parseScorePicks(d.scores).filter(score=>{const key=crsKeyForScore(score);if(scorePoolKeys.has(key))return false;scorePoolKeys.add(key);return true});
+  editingId=id;const m=findMatch(id);if(!m){toast('找不到这场比赛');return}
+  const d=deepClone(draftFor(id)),scorePoolKeys=new Set();let scorePicks=parseScorePicks(d.scores).filter(score=>{const key=crsKeyForScore(score);if(scorePoolKeys.has(key))return false;scorePoolKeys.add(key);return true});
   const hit=evaluateDraft(m,d,optionWins),hitSet=new Set(hit.hitKeys);
   const scoreText=m.score||m.sectionsNo999||'';
   const statusText=resultStatusLabel(m);
-  $('#editContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">${esc(m.league)} · ${esc(m.num)}</p><h2>${esc(m.home)} vs ${esc(m.away)}</h2><p class="dialog-score-badge">${scoreText?`<b>${esc(scoreText)}</b>`:'暂无比分'} · ${esc(statusText)}${hit.finished&&hit.anyHit?' · 有命中':''}</p><p id="draftAutoSaveStatus" class="autosave-status" aria-live="polite">点选后自动保存</p></div><button value="cancel">×</button></div>
+  const showResultMeta=Boolean(scoreText||m.matchResultStatus||m.fromResult);
+  $('#editContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">${esc(m.league)} · ${esc(m.num)}</p><h2>${esc(m.home)} vs ${esc(m.away)}</h2>${showResultMeta?`<p class="dialog-score-badge">${scoreText?`<b>${esc(scoreText)}</b>`:'暂无比分'} · ${esc(statusText)}${hit.finished&&hit.anyHit?' · 有命中':''}</p>`:''}<p id="draftAutoSaveStatus" class="autosave-status" aria-live="polite">点选后自动保存</p></div><button value="cancel">×</button></div>
   <div class="pick-group"><h4>胜平负</h4><div class="pick-grid">${pickButtons('spf',[['h','胜',m.had?.h],['d','平',m.had?.d],['a','负',m.had?.a]],d.spf,hitSet)}</div></div>
   <div class="pick-group"><h4>让球胜平负 <span class="match-no">${esc(m.hhad?.goalLine||'')}</span></h4><div class="pick-grid">${pickButtons('hhad',[['h','让胜',m.hhad?.h],['d','让平',m.hhad?.d],['a','让负',m.hhad?.a]],d.hhad,hitSet)}</div></div>
   <div class="pick-group"><h4>进球数</h4><div class="pick-grid goals">${pickButtons('goals',['0','1','2','3','4','5','6','7+'].map(x=>[x,x,m.ttg?.[`s${x==='7+'?'7':x}`]]),d.goals,hitSet)}</div></div>
-  <div class="pick-group score-group"><h4>比分</h4><p class="section-note">输入主队和客队进球数，冒号固定；可添加多个比分。完赛后命中项会标红。</p><div class="score-builder"><input id="scoreHomeInput" type="number" inputmode="numeric" min="0" max="99" placeholder="主"><span>:</span><input id="scoreAwayInput" type="number" inputmode="numeric" min="0" max="99" placeholder="客"><button type="button" id="addScoreBtn">添加</button></div><div id="scorePicksList" class="score-picks-list"></div></div>
+  <div class="pick-group score-group"><h4>比分</h4><p class="section-note">输入主队和客队进球数，冒号固定；可添加多个比分。${hit.finished?'完赛后命中项会标红。':''}</p><div class="score-builder"><input id="scoreHomeInput" type="number" inputmode="numeric" min="0" max="99" placeholder="主"><span>:</span><input id="scoreAwayInput" type="number" inputmode="numeric" min="0" max="99" placeholder="客"><button type="button" id="addScoreBtn">添加</button></div><div id="scorePicksList" class="score-picks-list"></div></div>
   <div class="pick-group"><h4>信心标签</h4><div class="confidence-grid">${['主推','次选','冷门','风险','放弃'].map(x=>`<button type="button" class="pick-btn ${d.confidence===x?'selected':''}" data-confidence="${x}">${x}</button>`).join('')}</div></div>
   <label>分析理由<textarea class="field-input" id="noteInput" rows="4" placeholder="记录信息、赔率变化和判断理由">${esc(d.note)}</textarea></label>`;
   const dlg=$('#editDialog');dlg.showModal();let noteSaveTimer;
@@ -471,39 +544,23 @@ function saveReport(){
   toast('复盘页会自动对照最近3天研究，无需手动保存历史');
 }
 function renderReview(){
-  const root=$('#reviewList');
-  if(!root) return;
-  const dates=reviewDateKeys().slice().reverse();
-  root.innerHTML=dates.map(date=>{
-    const matches=matchesForReviewDate(date);
-    const summary=summarizeDay(matches,state.drafts,optionWins);
-    const cards=matches.length?matches.map(m=>{
-      const d=draftFor(m.id),hit=evaluateDraft(m,d,optionWins);
-      const tags=[];
-      if(d.spf.length) d.spf.forEach(p=>tags.push({text:pickLabel('spf',p),hit:hit.detail.spf.some(x=>x.pick===p&&x.hit)}));
-      if(d.hhad.length) tags.push({text:`${m.hhad?.goalLine||m.goalLine||'让球'} ${d.hhad.map(p=>pickLabel('hhad',p)).join('/')}`,hit:hit.detail.hhad.some(x=>x.hit)});
-      if(d.goals.length) d.goals.forEach(p=>tags.push({text:`进球${p}`,hit:hit.detail.goals.some(x=>x.pick===p&&x.hit)}));
-      if(d.scores) parseScorePicks(d.scores).forEach(p=>tags.push({text:p,hit:hit.detail.scores.some(x=>x.pick===p&&x.hit)}));
-      if(d.confidence) tags.unshift({text:d.confidence,hit:false});
-      const score=m.score||m.sectionsNo999||'—';
-      return `<article class="review-match-card ${hit.anyHit?'hit-card':''}" data-review-match="${m.id}">
-        <div class="review-match-top"><span class="league">${esc(m.league||'')}</span><span class="match-no">${esc(m.num||'')}</span><span class="teams">${esc(m.home)} vs ${esc(m.away)}</span><span class="review-score">${esc(score)}</span></div>
-        <div class="review-match-bottom"><span class="review-status">${esc(resultStatusLabel(m))}${hit.finished&&hit.anyHit?' · 命中':''}</span><div class="pick-summary">${tags.length?tags.map(t=>`<span class="tag ${t.hit?'hit':''}">${esc(t.text)}</span>`).join(''):'<span class="tag">未研究</span>'}</div></div>
-      </article>`;
-    }).join(''):'<div class="review-empty">这一天暂无比赛或赛果</div>';
-    return `<section class="review-day-card" data-review-date="${date}">
-      <div class="review-day-head">
-        <div>
-          <h3>${weekday(date)} · ${fmtDate(date)}</h3>
-          <p class="review-day-meta">${summary.total}场 · 完赛${summary.finished} · 研究${summary.researched} · 命中${summary.hitMatches}${summary.allFinished?' · 已全部完赛':''}</p>
-        </div>
-        <button type="button" class="primary small" data-review-poster="${date}">生成复盘图</button>
-      </div>
-      <div class="review-match-list">${cards}</div>
-    </section>`;
-  }).join('');
-  $$('[data-review-match]').forEach(el=>el.onclick=()=>openEdit(el.dataset.reviewMatch));
-  $$('[data-review-poster]').forEach(btn=>btn.onclick=()=>showReviewPoster(btn.dataset.reviewPoster));
+  const dateStrip=$('#reviewDateStrip'),listEl=$('#reviewMatchList'),heroTitle=$('#reviewHeroTitle'),editedCount=$('#reviewEditedCount'),totalCount=$('#reviewTotalCount'),hitCount=$('#reviewHitCount');
+  if(!dateStrip||!listEl) return;
+  const dates=reviewDateKeys();
+  const date=ensureReviewDate();
+  const matches=matchesForReviewDate(date);
+  const summary=summarizeDay(matches,state.drafts,optionWins);
+  dateStrip.innerHTML=dates.map(d=>`<button class="date-pill ${d===date?'active':''}" data-review-date="${d}">${weekday(d)} · ${fmtDate(d)}</button>`).join('');
+  if(heroTitle) heroTitle.textContent=`${weekday(date)} · ${fmtDate(date)}`;
+  if(editedCount) editedCount.textContent=summary.researched;
+  if(totalCount) totalCount.textContent=summary.total;
+  if(hitCount) hitCount.textContent=summary.hitMatches;
+  const meta=$('#reviewMeta');
+  if(meta) meta.textContent=`完赛 ${summary.finished}/${summary.total}${summary.allFinished?' · 已全部完赛':''}${state.lastResultSync?` · 赛果 ${new Date(state.lastResultSync).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`:''}`;
+  listEl.innerHTML=matches.length?matches.map(reviewMatchCard).join(''):'<div class="empty">这一天暂无比赛或赛果<br>点右上角刷新后会更新比分</div>';
+  $$('#reviewMatchList [data-review-match]').forEach(el=>el.onclick=()=>openEdit(el.dataset.reviewMatch));
+  const posterBtn=$('#reviewPosterBtn');
+  if(posterBtn) posterBtn.onclick=()=>showReviewPoster(date);
 }
 function renderHistory(){renderReview()}
 
@@ -630,7 +687,8 @@ async function importData(file){try{const data=JSON.parse(await file.text());if(
 
 function bind(){
   $('#refreshBtn').onclick=()=>fetchMatches();$('#manualAddBtn').onclick=openManual;$('#addComboBtn').onclick=()=>openCombo();$('#scanPosterBtn').onclick=showScanPoster;$('#posterBtn').onclick=showPoster;$('#closePosterBtn').onclick=closePosterDialog;$('[data-close-poster]').onclick=closePosterDialog;$('#downloadPosterBtn').onclick=downloadPoster;$('#openPosterBtn').onclick=openPosterImage;
-  $('#dateStrip').onclick=e=>{const b=e.target.closest('[data-date]');if(b){state.activeDate=b.dataset.date;saveState();renderAll()}};
+  $('#dateStrip').onclick=e=>{const b=e.target.closest('[data-date]');if(b){state.activeDate=b.dataset.date;saveState();renderDates();renderMatches();renderCombos()}};
+  const reviewStrip=$('#reviewDateStrip');if(reviewStrip) reviewStrip.onclick=e=>{const b=e.target.closest('[data-review-date]');if(b){state.reviewDate=b.dataset.reviewDate;saveState();renderReview()}};
   $('#filterBar').onclick=e=>{const b=e.target.closest('[data-filter]');if(b){activeFilter=b.dataset.filter;$$('#filterBar button').forEach(x=>x.classList.toggle('active',x===b));renderMatches()}};
   $$('.bottom-nav button').forEach(b=>b.onclick=()=>{$$('.bottom-nav button').forEach(x=>x.classList.toggle('active',x===b));$$('.page').forEach(p=>p.classList.toggle('active',p.id===b.dataset.page));if(b.dataset.page==='plansPage')renderCombos();if(b.dataset.page==='reviewPage')renderReview()});
   $('#saveSettingsBtn').onclick=()=>{state.settings.author=$('#authorInput').value.trim()||'足球研究员';state.settings.disclaimer=$('#disclaimerInput').value.trim();saveState();toast('设置已保存')};
@@ -638,4 +696,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
