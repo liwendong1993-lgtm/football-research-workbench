@@ -6,7 +6,7 @@ const RESULT_URL=`${API_HOST}/getUniformMatchResultV1.qry`;
 const STORE_KEY='football-workbench-v1';
 const {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,optionWins,comboMetrics,schemePrizeRange,passTypeLabel}=ComboUtils;
 const {formatScanRow}=ScanUtils;
-const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore,matchSaleDate,saleDateFromMatchNum}=ReviewUtils;
+const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore,matchSaleDate,saleDateFromMatchNum,chinaDateKey}=ReviewUtils;
 const DEFAULT_STATE={matches:[],reviewMatches:[],drafts:{},combos:{},reports:[],activeDate:'',reviewDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:'',lastResultSync:''};
 let state=loadState();
 let activeFilter='all';
@@ -23,8 +23,9 @@ function deepClone(value){return typeof structuredClone==='function'?structuredC
 function loadState(){try{return {...deepClone(DEFAULT_STATE),...JSON.parse(localStorage.getItem(STORE_KEY)||'{}')}}catch{return deepClone(DEFAULT_STATE)}}
 function saveState(){localStorage.setItem(STORE_KEY,JSON.stringify(state))}
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),2200)}
-function weekday(date){return ['周日','周一','周二','周三','周四','周五','周六'][new Date(date+'T12:00:00').getDay()]}
-function fmtDate(date){const [,m,d]=date.split('-');return `${Number(m)}月${Number(d)}日`}
+function weekday(date){const key=String(date||'').slice(0,10),m=key.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!m)return '';const idx=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0)).getUTCDay();return ['周日','周一','周二','周三','周四','周五','周六'][idx]}
+function fmtDate(date){const key=String(date||'');const parts=key.split('-');if(parts.length<3)return key;return `${Number(parts[1])}月${Number(parts[2])}日`}
+function todayChina(){return chinaDateKey(new Date())}
 function draftFor(id){return state.drafts[id]||{spf:[],hhad:[],goals:[],scores:'',confidence:'',note:''}}
 function isEdited(d){return d.spf.length||d.hhad.length||d.goals.length||d.scores||d.confidence||d.note}
 function pickLabel(market,pick){const maps={spf:{h:'胜',d:'平',a:'负'},hhad:{h:'让胜',d:'让平',a:'让负'}};return maps[market]?.[pick]||pick}
@@ -262,36 +263,34 @@ function mergeOdds(base,bonus){
   if(bonus?.crs&&Object.keys(bonus.crs).length) next.crs={...next.crs,...bonus.crs};
   return next;
 }
-async function fetchJson(url,timeoutMs=12000){
+async function fetchJson(url,timeoutMs=15000){
   const controller=typeof AbortController==='function'?new AbortController():null;
   const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
   try{
-    const res=await fetch(url,{cache:'no-store',signal:controller?.signal});
+    const res=await fetch(url,{cache:'no-store',signal:controller?controller.signal:undefined});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const text=await res.text();
+    try{return JSON.parse(text)}catch(parseError){throw new Error(`JSON解析失败: ${text.slice(0,80)}`)}
   }finally{
     if(timer) clearTimeout(timer);
   }
 }
 async function fetchJsonWithFallback(url){
-  try{
-    return await fetchJson(url,10000);
-  }catch(error){
-    // Some WebViews/WAFs block the result endpoint directly; try a public CORS mirror as last resort.
-    const proxies=[
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-      `https://corsproxy.io/?${encodeURIComponent(url)}`
-    ];
-    let lastError=error;
-    for(const proxyUrl of proxies){
-      try{
-        return await fetchJson(proxyUrl,8000);
-      }catch(proxyError){
-        lastError=proxyError;
-      }
+  const attempts=[
+    url,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+  ];
+  let lastError=null;
+  for(let i=0;i<attempts.length;i+=1){
+    try{
+      return await fetchJson(attempts[i], i===0?12000:10000);
+    }catch(error){
+      lastError=error;
+      console.warn('接口读取失败', i===0?'直连':'代理'+(i), error&&error.message?error.message:error);
     }
-    throw lastError;
   }
+  throw lastError||new Error('接口读取失败');
 }
 async function mapPool(items,limit,worker){
   const results=new Array(items.length);let cursor=0;
@@ -316,27 +315,27 @@ function mapLegacyMatch(m,goalMap,scoreMap){
 }
 async function fetchLegacyCalculatorMatches(){
   const loadPool=async pool=>{
-    const json=await fetchJson(LEGACY_CALC_URL+pool);
-    if(!json?.success) throw new Error(json?.errorMessage||`${pool} 接口返回失败`);
+    const json=await fetchJsonWithFallback(LEGACY_CALC_URL+pool);
+    if(!json||!json.success) throw new Error((json&&json.errorMessage)||`${pool} 接口返回失败`);
     return json;
   };
   const json=await loadPool('hhad,had');
-  const stopMessage=json?.value?.vtoolsConfig?.onLineStopMessage||json?.value?.vtoolsConfig?.offLineStopMessage||'';
-  const groups=json?.value?.matchInfoList;
+  const stopMessage=(json.value&&json.value.vtoolsConfig&&(json.value.vtoolsConfig.onLineStopMessage||json.value.vtoolsConfig.offLineStopMessage))||'';
+  const groups=json.value&&json.value.matchInfoList;
   if(!Array.isArray(groups)||!groups.length){
     const err=new Error(stopMessage||'竞彩计算器暂无比赛');
     err.code='CALCULATOR_EMPTY';
     throw err;
   }
   const [goalsJson,scoresJson]=await Promise.all([loadPool('ttg').catch(()=>null),loadPool('crs').catch(()=>null)]);
-  const poolMap=data=>new Map((data?.value?.matchInfoList||[]).flatMap(g=>g.subMatchList||[]).map(m=>[String(m.matchId),m]));
+  const poolMap=data=>new Map(((data&&data.value&&data.value.matchInfoList)||[]).flatMap(g=>g.subMatchList||[]).map(m=>[String(m.matchId),m]));
   const goalMap=poolMap(goalsJson),scoreMap=poolMap(scoresJson);
   return groups.flatMap(g=>g.subMatchList||[]).map(m=>mapLegacyMatch(m,goalMap,scoreMap));
 }
 async function fetchMatchListMatches(){
-  const json=await fetchJson(MATCH_LIST_URL);
-  if(!json?.success) throw new Error(json?.errorMessage||'比赛列表接口返回失败');
-  const groups=json?.value?.matchInfoList;
+  const json=await fetchJsonWithFallback(MATCH_LIST_URL);
+  if(!json||!json.success) throw new Error((json&&json.errorMessage)||'比赛列表接口返回失败');
+  const groups=json.value&&json.value.matchInfoList;
   if(!Array.isArray(groups)) throw new Error('比赛列表格式异常');
   const baseList=groups.flatMap(g=>g.subMatchList||[]).map(m=>{
     const odds=oddsFromList(m.oddsList||[]);
@@ -349,73 +348,101 @@ async function fetchMatchListMatches(){
     };
   });
   // Enrich with fixed-bonus detail (goals/score odds) when available. Failures are ignored per match.
-  const bonusList=await mapPool(baseList,6,async match=>{
-    try{
-      const bonusJson=await fetchJson(FIXED_BONUS_URL+match.id);
-      const history=bonusJson?.value?.oddsHistory;
-      const value=bonusJson?.value||{};
-      if(!bonusJson?.success) return null;
-      const scoreInfo=normalizeResultRecord({
-        matchId:match.id,
-        matchDate:match.matchDate,
-        businessDate:match.businessDate,
-        matchNumStr:match.num,
-        homeTeam:match.home,
-        awayTeam:match.away,
-        leagueNameAbbr:match.league,
-        sectionsNo999:value.sectionsNo999,
-        sectionsNo1:value.sectionsNo1,
-        matchResultStatus:value.sectionsNo999? '2':'',
-        goalLine:latestBonusItem(history?.hhadList)?.goalLine,
-        winFlag:(value.matchResultList||[]).find(x=>String(x.code||'').toUpperCase()==='HAD')?.combination||''
-      });
-      return {
-        had:normalizeBonusPool(latestBonusItem(history?.hadList),['h','d','a']),
-        hhad:normalizeBonusPool(latestBonusItem(history?.hhadList),['h','d','a']),
-        ttg:normalizeBonusPool(latestBonusItem(history?.ttgList),['s0','s1','s2','s3','s4','s5','s6','s7']),
-        crs:normalizeCrsPool(latestBonusItem(history?.crsList)),
-        result:scoreInfo.score?scoreInfo:null,
-        matchResultList:value.matchResultList||[]
-      };
-    }catch(error){
-      console.warn('固定奖金读取失败',match.id,error);
-      return null;
-    }
-  });
+  // Fixed bonus is optional; do not let slow/blocked detail requests fail the whole list.
+  let bonusList=[];
+  try{
+    bonusList=await mapPool(baseList,4,async match=>{
+      try{
+        const bonusJson=await fetchJson(FIXED_BONUS_URL+match.id,8000);
+        const history=bonusJson&&bonusJson.value&&bonusJson.value.oddsHistory;
+        const value=(bonusJson&&bonusJson.value)||{};
+        if(!bonusJson||!bonusJson.success) return null;
+        const scoreInfo=normalizeResultRecord({
+          matchId:match.id,
+          matchDate:match.matchDate,
+          businessDate:match.businessDate,
+          matchNumStr:match.num,
+          homeTeam:match.home,
+          awayTeam:match.away,
+          leagueNameAbbr:match.league,
+          sectionsNo999:value.sectionsNo999,
+          sectionsNo1:value.sectionsNo1,
+          matchResultStatus:value.sectionsNo999? '2':'',
+          goalLine:latestBonusItem(history&&history.hhadList)&&latestBonusItem(history.hhadList).goalLine,
+          winFlag:((value.matchResultList)||[]).find(x=>String(x.code||'').toUpperCase()==='HAD')&&((value.matchResultList)||[]).find(x=>String(x.code||'').toUpperCase()==='HAD').combination||''
+        });
+        return {
+          had:normalizeBonusPool(latestBonusItem(history&&history.hadList),['h','d','a']),
+          hhad:normalizeBonusPool(latestBonusItem(history&&history.hhadList),['h','d','a']),
+          ttg:normalizeBonusPool(latestBonusItem(history&&history.ttgList),['s0','s1','s2','s3','s4','s5','s6','s7']),
+          crs:normalizeCrsPool(latestBonusItem(history&&history.crsList)),
+          result:scoreInfo.score?scoreInfo:null,
+          matchResultList:value.matchResultList||[]
+        };
+      }catch(error){
+        console.warn('固定奖金读取失败',match.id,error);
+        return null;
+      }
+    });
+  }catch(error){
+    console.warn('固定奖金批量读取失败，保留基础赔率',error);
+    bonusList=[];
+  }
   return baseList.map((match,index)=>{
     const bonus=bonusList[index];
     if(!bonus) return match;
     const merged=mergeOdds(match,bonus);
     const next={...match,...merged};
     if(bonus.result) applyResultToMatch(next,bonus.result);
-    if(bonus.matchResultList?.length) next.matchResultList=bonus.matchResultList;
+    if(bonus.matchResultList&&bonus.matchResultList.length) next.matchResultList=bonus.matchResultList;
     return next;
   });
 }
 async function fetchMatches(show=true){
   if(show) $('#dataStatus').textContent='正在读取比赛...';
+  const previous=state.matches.slice().filter(m=>!m.fromResult);
   try{
     let list=[],source='list';
     try{
       list=await fetchMatchListMatches();
     }catch(listError){
       console.warn('比赛列表同步失败，尝试计算器接口',listError);
-      list=await fetchLegacyCalculatorMatches();
-      source='calculator';
+      try{
+        list=await fetchLegacyCalculatorMatches();
+        source='calculator';
+      }catch(calcError){
+        console.warn('计算器接口也失败',calcError);
+        if(previous.length){
+          state.matches=previous;
+          const dates=[...new Set(saleMatches().map(m=>m.businessDate).filter(Boolean))].sort();
+          if(!state.activeDate||!dates.includes(state.activeDate)) state.activeDate=dates[0]||todayChina();
+          ensureReviewDate();
+          syncReviewPoolFromSale();
+          saveState();
+          $('#dataStatus').textContent=`本地缓存·北京${todayChina().slice(5)}`;
+          if(show) toast('网络读取失败，已显示本地缓存（赛程按北京时间）');
+          renderAll();
+          try{
+            const resultCount=await fetchMatchResults();
+            if(resultCount){saveState();renderAll()}
+          }catch(resultError){console.warn('赛果同步失败',resultError);syncReviewPoolFromSale();saveState();renderReview()}
+          return;
+        }
+        throw calcError;
+      }
     }
-    const previous=state.matches.slice().filter(m=>!m.fromResult);
     state.matches=preserveMatchMeta(previous,list);
     state.lastSync=new Date().toISOString();saveState();
-    const withOdds=list.filter(m=>m.had?.h||m.hhad?.h||m.ttg?.s0||Object.keys(m.crs||{}).length).length;
+    const withOdds=list.filter(m=>(m.had&&m.had.h)||(m.hhad&&m.hhad.h)||(m.ttg&&m.ttg.s0)||Object.keys(m.crs||{}).length).length;
     if(!list.length){
       $('#dataStatus').textContent='暂无在售比赛';
       if(show) toast('当前没有在售竞彩足球，可手动添加');
     }else{
-      $('#dataStatus').textContent=`${list.length}场已同步`;
+      $('#dataStatus').textContent=`${list.length}场·北京${todayChina().slice(5)}`;
       if(show) toast(withOdds?`已同步 ${list.length} 场（${withOdds} 场含赔率）`:`已同步 ${list.length} 场比赛`);
     }
     const dates=[...new Set(saleMatches().map(m=>m.businessDate).filter(Boolean))].sort();
-    if(!state.activeDate||!dates.includes(state.activeDate)) state.activeDate=dates[0]||new Date().toISOString().slice(0,10);
+    if(!state.activeDate||!dates.includes(state.activeDate)) state.activeDate=dates[0]||todayChina();
     ensureReviewDate();
     syncReviewPoolFromSale();
     renderAll();
@@ -423,7 +450,7 @@ async function fetchMatches(show=true){
     try{
       const resultCount=await fetchMatchResults();
       saveState();
-      if(resultCount) $('#dataStatus').textContent=`${list.length||saleMatches().length}场·赛果${resultCount}`;
+      if(resultCount) $('#dataStatus').textContent=`${list.length||saleMatches().length}场·赛果${resultCount}·北京${todayChina().slice(5)}`;
       renderAll();
     }catch(resultError){
       console.warn('赛果同步失败',resultError);
@@ -431,9 +458,10 @@ async function fetchMatches(show=true){
     }
   }catch(err){
     const localCount=state.matches.filter(m=>!m.manual).length;
-    $('#dataStatus').textContent=localCount?'本地缓存':'同步失败';
-    toast(localCount?'读取失败，已保留本地数据':'读取失败，请稍后重试或手动添加');
-    console.error(err);renderAll();
+    $('#dataStatus').textContent=localCount?`本地缓存·北京${todayChina().slice(5)}`:'同步失败';
+    toast(localCount?'读取失败，已保留本地数据（按北京时间）':'读取失败，请稍后重试或检查网络');
+    console.error(err);
+    ensureReviewDate();syncReviewPoolFromSale();renderAll();
   }
 }
 
@@ -553,7 +581,7 @@ function openCombo(id){
 
 function openManual(){
   $('#manualContent').innerHTML=`<div class="sheet-handle"></div><div class="dialog-head"><div><p class="eyebrow">MANUAL MATCH</p><h2>手动添加比赛</h2></div><button value="cancel">×</button></div>
-  <label>日期<input id="manualDate" type="date" class="field-input" value="${state.activeDate||new Date().toISOString().slice(0,10)}"></label><label>比赛编号<input id="manualNum" class="field-input" placeholder="周五201"></label><label>联赛<input id="manualLeague" class="field-input" placeholder="英超"></label><label>主队<input id="manualHome" class="field-input"></label><label>客队<input id="manualAway" class="field-input"></label><label>开赛时间<input id="manualTime" type="time" class="field-input"></label><button type="button" id="saveManual" class="primary full">添加比赛</button>`;
+  <label>日期<input id="manualDate" type="date" class="field-input" value="${state.activeDate||todayChina()}"></label><label>比赛编号<input id="manualNum" class="field-input" placeholder="周五201"></label><label>联赛<input id="manualLeague" class="field-input" placeholder="英超"></label><label>主队<input id="manualHome" class="field-input"></label><label>客队<input id="manualAway" class="field-input"></label><label>开赛时间<input id="manualTime" type="time" class="field-input"></label><button type="button" id="saveManual" class="primary full">添加比赛</button>`;
   const dlg=$('#manualDialog');dlg.showModal();$('#saveManual').onclick=()=>{const date=$('#manualDate').value,home=$('#manualHome').value.trim(),away=$('#manualAway').value.trim();if(!date||!home||!away){toast('请填写日期和对阵双方');return}state.matches.push({id:'manual-'+uid(),businessDate:date,matchDate:date,time:$('#manualTime').value,num:$('#manualNum').value.trim()||'自定义',league:$('#manualLeague').value.trim()||'足球',home,away,had:{},hhad:{},manual:true});state.activeDate=date;saveState();dlg.close();renderAll();toast('比赛已添加')};
 }
 
@@ -700,7 +728,7 @@ async function downloadPoster(){const button=$('#downloadPosterBtn'),status=$('#
 async function openPosterImage(){const status=$('#posterSaveStatus'),popup=window.open('about:blank','_blank');try{const blob=await canvasToBlob(),url=URL.createObjectURL(blob);if(popup){popup.document.open();popup.document.write(`<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(posterPrefix())}</title><style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0}img{display:block;width:100%;height:auto;-webkit-touch-callout:default}</style><p>请长按下方图片，选择“保存图片”</p><img src="${url}" alt="${esc(posterPrefix())}">`);popup.document.close();status.textContent='已打开大图，请在新页面长按图片保存。';status.className='poster-save-status success'}else{$('#posterImage').scrollIntoView({behavior:'smooth',block:'center'});status.textContent='夸克拦截了新页面，请直接长按上方图片，选择“保存图片”。';status.className='poster-save-status error'}}catch(error){if(popup)popup.close();console.error('打开大图失败',error);status.textContent='打开失败，请直接长按上方图片保存。';status.className='poster-save-status error'}}
 
 function renderSettings(){$('#authorInput').value=state.settings.author||'';$('#disclaimerInput').value=state.settings.disclaimer||''}
-function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`足球研究工作台备份-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href);toast('备份已导出')}
+function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`足球研究工作台备份-${todayChina()}.json`;a.click();URL.revokeObjectURL(a.href);toast('备份已导出')}
 async function importData(file){try{const data=JSON.parse(await file.text());if(!data||!Array.isArray(data.matches))throw new Error('格式不正确');state={...deepClone(DEFAULT_STATE),...data};saveState();renderAll();toast('备份导入成功')}catch{toast('导入失败：文件格式不正确')}}
 
 function bind(){
@@ -714,4 +742,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-review4',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-bj1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

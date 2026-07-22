@@ -11,9 +11,14 @@ test('最近3天日期包含今天并向前共3天', () => {
 });
 
 test('复盘日期默认按北京时间，避免海外时区少一天', () => {
-  const { chinaDateKey } = require('../review-utils.js');
-  // 2026-07-21 01:30 UTC = 北京时间 09:30，仍是 21 日
+  const { chinaDateKey, recentDateKeys, saleDateFromMatchNum } = require('../review-utils.js');
+  // 2026-07-22 03:41 UTC = 北京 11:41 仍是 22 日；美西 7/21 20:41 对应同一时刻
+  assert.equal(chinaDateKey(new Date('2026-07-22T03:41:00Z')), '2026-07-22');
   assert.equal(chinaDateKey(new Date('2026-07-21T01:30:00Z')), '2026-07-21');
+  // 最近三天也应按北京日切，不按本地日
+  assert.deepEqual(recentDateKeys(3, new Date('2026-07-22T03:41:00Z')), ['2026-07-20','2026-07-21','2026-07-22']);
+  // 开售日回推不依赖本地 getDay
+  assert.equal(saleDateFromMatchNum('周一204', '2026-07-21'), '2026-07-20');
 });
 
 test('竞彩编号按开售日回推，不按自然开赛日', () => {

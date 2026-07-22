@@ -7,22 +7,33 @@
   const HHAD_LABELS={h:'让胜',d:'让平',a:'让负'};
 
   function pad(n){return String(n).padStart(2,'0')}
+  // 所有“日历日”均按 YYYY-MM-DD 纯日期处理，不依赖浏览器用区。
   function toDateKey(date){
     if(typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
-    const d=date instanceof Date?date:new Date(date);
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    if(date instanceof Date&&!Number.isNaN(date.getTime())){
+      return chinaDateKey(date);
+    }
+    return chinaDateKey(new Date());
   }
   function chinaDateKey(date=new Date()){
     try{
       return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(date);
     }catch{
-      return toDateKey(date);
+      // 无 Intl 时：UTC 时刻 +8 小时后取 UTC 年月日 = 北京日期
+      const d=new Date((date instanceof Date?date:new Date()).getTime()+8*3600*1000);
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
     }
   }
+  function calendarWeekday(dateKey){
+    const m=String(dateKey||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return -1;
+    return new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]),12,0,0)).getUTCDay();
+  }
   function addDays(dateKey,delta){
-    const d=new Date(`${dateKey}T12:00:00`);
-    d.setDate(d.getDate()+delta);
-    return toDateKey(d);
+    const m=String(dateKey||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return chinaDateKey();
+    const d=new Date(Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3])+Number(delta||0),12,0,0));
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
   }
   function recentDateKeys(days=3,today=new Date()){
     const end=typeof today==='string'?toDateKey(today):chinaDateKey(today);
@@ -37,11 +48,9 @@
     const base=toDateKey(matchDate||'');
     if(!label||!base||!(label in WEEKDAY_INDEX)) return base||'';
     const target=WEEKDAY_INDEX[label];
-    const d=new Date(`${base}T12:00:00`);
     for(let i=0;i<7;i+=1){
-      const candidate=new Date(d);
-      candidate.setDate(d.getDate()-i);
-      if(candidate.getDay()===target) return toDateKey(candidate);
+      const candidate=addDays(base,-i);
+      if(calendarWeekday(candidate)===target) return candidate;
     }
     return base;
   }
@@ -205,7 +214,7 @@
   }
 
   return {
-    toDateKey,chinaDateKey,addDays,recentDateKeys,saleDateFromMatchNum,matchSaleDate,
+    toDateKey,chinaDateKey,calendarWeekday,addDays,recentDateKeys,saleDateFromMatchNum,matchSaleDate,
     parseScore,isFinishedResult,resultStatusLabel,
     normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,
     SPF_LABELS,HHAD_LABELS
