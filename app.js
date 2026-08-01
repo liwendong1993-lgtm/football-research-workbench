@@ -5,7 +5,7 @@ const LEGACY_CALC_URL=`${API_HOST}/getMatchCalculatorV1.qry?channel=c&poolCode=`
 const RESULT_URL=`${API_HOST}/getUniformMatchResultV1.qry`;
 const STORE_KEY='football-workbench-v1';
 const {parseScorePicks,crsKeyForScore,crsOddLookup,scoreOddsLabel,splitOptionValue,normalizeComboItems,enforceSingleMarketPerMatch,optionWins,comboMetrics,schemePrizeRange,passTypeLabel}=ComboUtils;
-const {formatScanRow}=ScanUtils;
+const {formatScanRow,sortMatchesBySequence}=ScanUtils;
 const {recentDateKeys,normalizeResultRecord,evaluateDraft,summarizeDay,formatReviewScanRow,resultStatusLabel,parseScore,matchSaleDate,saleDateFromMatchNum,chinaDateKey}=ReviewUtils;
 const DEFAULT_STATE={matches:[],reviewMatches:[],drafts:{},combos:{},reports:[],activeDate:'',reviewDate:'',settings:{author:'足球研究员',disclaimer:'仅代表个人足球研究观点，请理性看待比赛，不提供投注、代购或跟单服务。'},lastSync:'',lastResultSync:''};
 let state=loadState();
@@ -651,7 +651,7 @@ function drawSingleComboPoster(combo){
 }
 function showSingleComboPoster(combo){posterMode='combo';if(!drawSingleComboPoster(combo))return;showPosterDialog('单条方案图预览')}
 function drawScanPoster(){
-  const matches=state.matches.filter(m=>m.businessDate===state.activeDate).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  const matches=sortMatchesBySequence(state.matches.filter(m=>m.businessDate===state.activeDate));
   if(!matches.length){toast('当前日期没有比赛');return false}
   const rows=matches.map(m=>formatScanRow(m,draftFor(m.id))),edited=rows.filter(r=>r.edited).length;
   const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d'),width=1200,rowH=104,tableY=390,height=tableY+62+rows.length*rowH+240;
@@ -753,4 +753,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260721-poster1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260731-scan-sequence1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
