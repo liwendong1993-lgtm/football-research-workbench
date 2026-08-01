@@ -5,6 +5,19 @@
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
   const labels={spf:{h:'胜',d:'平',a:'负'},hhad:{h:'让胜',d:'让平',a:'让负'}};
   const splitScores=value=>String(value||'').split(/[、,，/\s]+/).map(x=>x.trim()).filter(Boolean);
+  const sequenceOf=match=>{
+    const digits=String(match?.num||'').replace(/\D/g,'').slice(-3);
+    return digits?Number(digits):Number.POSITIVE_INFINITY;
+  };
+  function sortMatchesBySequence(matches){
+    return [...(matches||[])].sort((a,b)=>{
+      const sequenceDifference=sequenceOf(a)-sequenceOf(b);
+      if(Number.isFinite(sequenceDifference)&&sequenceDifference!==0)return sequenceDifference;
+      if(sequenceOf(a)!==sequenceOf(b))return Number.isFinite(sequenceOf(a))?-1:1;
+      const numberDifference=String(a?.num||'').localeCompare(String(b?.num||''),'zh-CN',{numeric:true});
+      return numberDifference||String(a?.time||'').localeCompare(String(b?.time||''));
+    });
+  }
   function formatScanRow(match,draft){
     const d=draft||{},spf=d.spf||[],hhad=d.hhad||[],goals=d.goals||[],scores=splitScores(d.scores);
     const edited=Boolean(spf.length||hhad.length||goals.length||scores.length||d.confidence||d.note);
@@ -17,5 +30,5 @@
       confidence:d.confidence||'',edited
     };
   }
-  return {formatScanRow};
+  return {formatScanRow,sortMatchesBySequence};
 });
