@@ -17,6 +17,11 @@ test('网站与扫盘图使用老花鉴足品牌文案',()=>{
   assert.equal(manifestData.short_name,'老花鉴足');
 });
 
+test('全部扫盘图按比赛序号排列',()=>{
+  assert.match(app,/drawScanPoster\(\)[\s\S]*sortMatchesBySequence\(state\.matches\.filter/);
+  assert.doesNotMatch(app,/drawScanPoster\(\)[\s\S]*\.sort\(\(a,b\)=>\(a\.time/);
+});
+
 test('方案卡片提供倍数输入并实时更新金额和返奖',()=>{
   assert.match(app,/data-combo-multiple/);
   assert.match(app,/schemePrizeRange\(items,2,c\.multiple/);
@@ -82,12 +87,12 @@ test('夸克海报预览失败时回退Canvas',()=>{
 });
 
 test('发布缓存版本在应用外壳中保持一致',()=>{
-  const release='20260721-poster1';
+  const release='20260731-scan-sequence1';
   for(const asset of ['styles.css','combo-utils.js','scan-utils.js','review-utils.js','app.js']){
     const escapedAsset=asset.replace('.','\\.');
     assert.match(html,new RegExp(`${escapedAsset}\\?v=${release}`));
     assert.match(sw,new RegExp(`${escapedAsset}\\?v=${release}`));
   }
   assert.match(app,new RegExp(`sw\\.js\\?v=${release}`));
-  assert.match(sw,/football-workbench-v20/);
+  assert.match(sw,/football-workbench-v21/);
 });
