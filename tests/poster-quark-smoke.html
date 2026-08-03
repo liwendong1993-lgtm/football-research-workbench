@@ -76,7 +76,14 @@
       return _fetch(input);
     };
     // Optionally strip native roundRect to prove polyfill path.
-    const strip = new URLSearchParams(location.search).get('stripRoundRect') === '1';
+    const params = new URLSearchParams(location.search);
+    const strip = params.get('stripRoundRect') === '1';
+    if (params.get('quark') === '1') {
+      Object.defineProperty(navigator, 'userAgent', {get:()=> 'Mozilla/5.0 (Linux; Android 13) Quark-UA-Smoke', configurable:true});
+      navigator.share = async () => { const e=new Error('Abort'); e.name='AbortError'; throw e; };
+      navigator.canShare = () => true;
+    }
+
     if (strip && window.CanvasRenderingContext2D) {
       try { delete CanvasRenderingContext2D.prototype.roundRect; } catch (_) {
         CanvasRenderingContext2D.prototype.roundRect = undefined;
@@ -143,9 +150,24 @@
         showPosterDialog('smoke');
         await refreshPosterPreview();
         await new Promise(r => setTimeout(r, 300));
-        log('preview img hidden=' + posterImage.hidden + ' srcKind=' + (posterImage.src.startsWith('blob:')?'blob':posterImage.src.slice(0,32)));
+        const srcKind = posterImage.src.startsWith('blob:') ? 'blob' : (posterImage.src.startsWith('data:image/jpeg') ? 'jpeg-data' : posterImage.src.slice(0,40));
+        log('preview img hidden=' + posterImage.hidden + ' srcKind=' + srcKind + ' isQuark=' + isQuarkLike());
         log('canvas hidden=' + posterCanvas.hidden);
         if (posterImage.hidden && posterCanvas.hidden) throw new Error('both preview surfaces hidden');
+        if (isQuarkLike()) {
+          if (!posterImage.src.startsWith('data:image/jpeg')) throw new Error('quark preview must be jpeg data url, got '+srcKind);
+          const asset = await exportPosterAsset(true);
+          if (asset.mime !== 'image/jpeg' || !asset.dataUrl.startsWith('data:image/jpeg')) throw new Error('quark export not jpeg dataurl');
+          if (asset.bytes > 1800000) throw new Error('quark export too large: '+asset.bytes);
+          await downloadPoster();
+          const layer = document.getElementById('posterSaveLayer');
+          if (!layer || layer.hidden) throw new Error('save layer not opened on quark download');
+          const layerImg = document.getElementById('posterSaveLayerImage');
+          if (!layerImg || !layerImg.src.startsWith('data:image/jpeg')) throw new Error('save layer image not jpeg dataurl');
+          const st = document.getElementById('posterSaveStatus').textContent || '';
+          if (st.includes('已取消分享')) throw new Error('false cancel share still shown: '+st);
+          log('quark save layer ok bytes=' + asset.bytes);
+        }
 
         // Max edge guard: huge height should clamp
         const huge = preparePosterCanvas(1200, 20000);

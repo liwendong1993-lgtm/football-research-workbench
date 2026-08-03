@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const app=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8');
+const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 
 test('海报弹窗不用夸克触控异常的原生dialog并强制静态资源同版本',()=>{
   assert.doesNotMatch(html,/<dialog id="posterDialog"/);
@@ -15,7 +16,7 @@ test('海报弹窗不用夸克触控异常的原生dialog并强制静态资源�
 
 test('图片预览失败时隐藏破图并回退显示Canvas',()=>{
   assert.match(app,/posterImage.*onerror/s);
-  assert.match(app,/toDataURL\('image\/png'\)/);
+  assert.match(app,/toDataURL\(/);
   assert.match(app,/posterCanvas.*hidden/s);
 });
 
@@ -32,18 +33,29 @@ test('单场组合可保存且组合弹窗内显示错误状态',()=>{
   assert.match(app,/saveCombo\.addEventListener\(['"]click['"]/);
 });
 
-test('支持文件分享时优先调用安卓系统分享面板',()=>{
+test('非夸克路径仍支持系统文件分享',()=>{
   assert.match(app,/navigator\.canShare/);
   assert.match(app,/navigator\.share/);
   assert.match(app,/new File/);
+  assert.match(app,/if\(!quark&&typeof File==='function'&&navigator\.share/);
 });
 
-test('夸克预览优先 Blob URL，并提供 roundRect 与超高画布保护',()=>{
-  assert.match(app,/URL\.createObjectURL\(blob\)/);
+test('提供 roundRect 与超高画布保护',()=>{
   assert.match(app,/function ensureRoundRect/);
   assert.match(app,/function preparePosterCanvas/);
   assert.match(app,/POSTER_MAX_EDGE/);
   assert.match(app,/revokePosterPreviewUrl/);
   assert.match(app,/生成扫盘图失败/);
   assert.match(app,/生成方案图失败/);
+});
+
+test('夸克保存避开伪分享并提供 dataURL 长按保存层',()=>{
+  assert.match(app,/isQuarkLike\s*=/);
+  assert.match(app,/function openPosterSaveLayer/);
+  assert.match(app,/exportPosterAsset/);
+  assert.match(app,/image\/jpeg/);
+  assert.match(app,/posterSaveLayer/);
+  assert.match(app,/openPosterSaveLayer\(asset\)/);
+  assert.match(html,/打开长按保存页|准备长按保存/);
+  assert.match(css,/\.poster-save-layer/);
 });

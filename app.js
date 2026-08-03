@@ -40,8 +40,19 @@ function ensureRoundRect(){
 }
 ensureRoundRect();
 const POSTER_MAX_EDGE=4096;
+// Quark/UC often report Web Share + canShare(files) but immediately Abort, and blob: long-press
+// shows “开始保存” without writing the album. Prefer compressed JPEG data URLs there.
+const isQuarkLike=()=>/Quark|UCBrowser|UCBS|UBrowser|HeyTapBrowser|OPPObrowser|vivoBrowser/i.test(navigator.userAgent||'');
 let posterPreviewUrl='';
-function revokePosterPreviewUrl(){if(posterPreviewUrl){try{URL.revokeObjectURL(posterPreviewUrl)}catch(_){}posterPreviewUrl=''}}
+let posterPreviewIsObjectUrl=false;
+let posterExportCache=null; // {dataUrl,blob,mime,ext,bytes,mode}
+function revokePosterPreviewUrl(){
+  if(posterPreviewIsObjectUrl&&posterPreviewUrl){
+    try{URL.revokeObjectURL(posterPreviewUrl)}catch(_){}
+  }
+  posterPreviewUrl='';
+  posterPreviewIsObjectUrl=false;
+}
 function preparePosterCanvas(width,height){
   const canvas=$('#posterCanvas');
   const scale=Math.min(1,POSTER_MAX_EDGE/Math.max(1,width),POSTER_MAX_EDGE/Math.max(1,height));
@@ -51,7 +62,157 @@ function preparePosterCanvas(width,height){
   if(!ctx)throw new Error('Canvas不可用');
   ctx.setTransform(scale,0,0,scale,0,0);
   ctx.imageSmoothingEnabled=true;
+  posterExportCache=null;
   return {canvas,ctx,scale,width,height};
+}
+function dataUrlToBlob(dataUrl){
+  const parts=String(dataUrl||'').split(',');
+  if(parts.length<2)throw new Error('图片转换失败');
+  const mime=(parts[0].match(/data:([^;]+)/)||[])[1]||'image/jpeg';
+  const bin=atob(parts[1]);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:mime});
+}
+function estimateDataUrlBytes(dataUrl){
+  const raw=String(dataUrl||'').split(',')[1]||'';
+  return Math.floor(raw.length*0.75);
+}
+function canvasToDataUrl(canvas,type,quality){
+  try{
+    if(typeof quality==='number')return canvas.toDataURL(type,quality);
+    return canvas.toDataURL(type);
+  }catch(error){
+    throw new Error(error?.message||'图片编码失败');
+  }
+}
+function shrinkCanvas(source,scale){
+  const c=document.createElement('canvas');
+  c.width=Math.max(1,Math.floor(source.width*scale));
+  c.height=Math.max(1,Math.floor(source.height*scale));
+  const ctx=c.getContext('2d');
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality='high';
+  ctx.drawImage(source,0,0,c.width,c.height);
+  return c;
+}
+// Build an album-friendly export. Quark long-press needs data: (not blob:) and usually <~1.6MB.
+function buildPosterExport(preferAlbum=false){
+  const canvas=$('#posterCanvas');
+  if(!canvas||!canvas.width||!canvas.height)throw new Error('海报尚未生成');
+  const quark=isQuarkLike()||preferAlbum;
+  const maxBytes=quark?1600000:4500000;
+  if(quark){
+    let work=canvas;
+    let quality=0.92;
+    let dataUrl=canvasToDataUrl(work,'image/jpeg',quality);
+    let guard=0;
+    while(estimateDataUrlBytes(dataUrl)>maxBytes&&guard<10){
+      guard+=1;
+      if(quality>0.55){
+        quality=Math.max(0.5,quality-0.1);
+      }else{
+        work=shrinkCanvas(work,0.82);
+        quality=0.84;
+      }
+      dataUrl=canvasToDataUrl(work,'image/jpeg',quality);
+    }
+    if(!dataUrl||dataUrl==='data:,')throw new Error('图片转换失败');
+    const blob=dataUrlToBlob(dataUrl);
+    return {dataUrl,blob,mime:'image/jpeg',ext:'jpg',bytes:blob.size,mode:'jpeg-dataurl',quality};
+  }
+  // Non-Quark: PNG blob first; fall back to JPEG data URL if toBlob missing/fails.
+  return null; // signal async path
+}
+async function exportPosterAsset(preferAlbum=false){
+  if(posterExportCache&&!preferAlbum)return posterExportCache;
+  const canvas=$('#posterCanvas');
+  if(!canvas||!canvas.width||!canvas.height)throw new Error('海报尚未生成');
+  const quark=isQuarkLike()||preferAlbum;
+  if(quark){
+    const asset=buildPosterExport(true);
+    posterExportCache=asset;
+    return asset;
+  }
+  // PNG via toBlob when possible
+  const pngBlob=await new Promise((resolve,reject)=>{
+    try{
+      if(typeof canvas.toBlob==='function'){
+        let settled=false;
+        const timer=setTimeout(()=>{if(!settled){settled=true;resolve(null)}},6000);
+        canvas.toBlob(blob=>{if(settled)return;settled=true;clearTimeout(timer);resolve(blob||null)},'image/png');
+      }else resolve(null);
+    }catch(error){resolve(null)}
+  });
+  if(pngBlob&&pngBlob.size>0&&pngBlob.size<=4500000){
+    const asset={dataUrl:'',blob:pngBlob,mime:'image/png',ext:'png',bytes:pngBlob.size,mode:'png-blob'};
+    // Also keep a moderate JPEG dataUrl for long-press fallback preview if needed later
+    posterExportCache=asset;
+    return asset;
+  }
+  const asset=buildPosterExport(true);
+  posterExportCache=asset;
+  return asset;
+}
+function posterFilenameFor(asset){
+  const base=posterFilename().replace(/\.png$/i,'');
+  return `${base}.${asset?.ext||'png'}`;
+}
+function applyPosterImageSource(image,asset){
+  revokePosterPreviewUrl();
+  if(asset.mode==='png-blob'||(!asset.dataUrl&&asset.blob)){
+    const url=URL.createObjectURL(asset.blob);
+    posterPreviewUrl=url;
+    posterPreviewIsObjectUrl=true;
+    image.src=url;
+  }else{
+    posterPreviewUrl=asset.dataUrl;
+    posterPreviewIsObjectUrl=false;
+    image.src=asset.dataUrl;
+  }
+}
+function ensurePosterSaveLayer(){
+  let layer=$('#posterSaveLayer');
+  if(layer)return layer;
+  layer=document.createElement('div');
+  layer.id='posterSaveLayer';
+  layer.className='poster-save-layer';
+  layer.hidden=true;
+  layer.innerHTML=`<div class="poster-save-layer-panel"><div class="poster-save-layer-head"><strong>长按保存到相册</strong><button type="button" class="icon-btn" data-close-save-layer aria-label="关闭">×</button></div><p class="poster-save-layer-tip">请长按下方图片 → 选择“保存图片 / 下载图片”。夸克对系统分享和 blob 链接经常无效，这一页用的是可保存的图片数据。</p><img id="posterSaveLayerImage" alt="长按保存海报" /><p id="posterSaveLayerStatus" class="poster-save-status" aria-live="polite"></p><button type="button" class="secondary full" data-close-save-layer>关闭</button></div>`;
+  document.body.appendChild(layer);
+  layer.addEventListener('click',e=>{
+    if(e.target===layer||e.target.closest('[data-close-save-layer]'))closePosterSaveLayer();
+  });
+  return layer;
+}
+function closePosterSaveLayer(){
+  const layer=$('#posterSaveLayer');
+  if(!layer)return;
+  layer.hidden=true;
+  const img=$('#posterSaveLayerImage');
+  if(img)img.removeAttribute('src');
+}
+async function openPosterSaveLayer(asset){
+  const layer=ensurePosterSaveLayer();
+  const img=$('#posterSaveLayerImage');
+  const tip=$('#posterSaveLayerStatus');
+  const ready=asset||await exportPosterAsset(true);
+  // Always prefer data URL inside the save layer for album write reliability.
+  let dataUrl=ready.dataUrl;
+  if(!dataUrl){
+    // convert blob -> data url
+    dataUrl=await new Promise((resolve,reject)=>{
+      const fr=new FileReader();
+      fr.onload=()=>resolve(fr.result);
+      fr.onerror=()=>reject(new Error('读取图片失败'));
+      fr.readAsDataURL(ready.blob);
+    });
+  }
+  img.onload=()=>{tip.textContent=`图片已就绪（约 ${Math.max(1,Math.round((ready.bytes||estimateDataUrlBytes(dataUrl))/1024))}KB）。请长按图片保存到相册。`;tip.className='poster-save-status success'};
+  img.onerror=()=>{tip.textContent='大图加载失败，请返回后重试生成。';tip.className='poster-save-status error'};
+  img.src=dataUrl;
+  tip.textContent='正在准备可保存图片…';tip.className='poster-save-status';
+  layer.hidden=false;
 }
 
 const $=s=>document.querySelector(s);
@@ -654,68 +815,57 @@ function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let 
 function posterPrefix(){return posterMode==='scan'?'全部扫盘':posterMode==='review'?'复盘对照':posterMode==='combo'?'单条方案':'足球研究'}
 function posterFilename(){return `${posterPrefix()}-${posterMode==='review'?(posterReviewDate||state.activeDate):state.activeDate}.png`}
 function canvasToBlob(){
-  const canvas=$('#posterCanvas');
-  return new Promise((resolve,reject)=>{
-    try{
-      if(!canvas||!canvas.width||!canvas.height)return reject(new Error('海报尚未生成'));
-      if(typeof canvas.toBlob==='function'){
-        let settled=false;
-        const timer=setTimeout(()=>{if(!settled){settled=true;fallbackDataUrl(resolve,reject)}},8000);
-        canvas.toBlob(blob=>{
-          if(settled)return;
-          if(blob){settled=true;clearTimeout(timer);resolve(blob)}
-          else{settled=true;clearTimeout(timer);fallbackDataUrl(resolve,reject)}
-        },'image/png');
-      }else fallbackDataUrl(resolve,reject);
-    }catch(error){reject(error)}
-  });
-  function fallbackDataUrl(resolve,reject){
-    try{
-      const dataUrl=canvas.toDataURL('image/png');
-      if(!dataUrl||dataUrl==='data:,')throw new Error('图片转换失败');
-      const raw=dataUrl.split(',')[1];
-      if(!raw)throw new Error('图片转换失败');
-      const data=atob(raw),bytes=new Uint8Array(data.length);
-      for(let i=0;i<data.length;i++)bytes[i]=data.charCodeAt(i);
-      resolve(new Blob([bytes],{type:'image/png'}));
-    }catch(error){reject(error)}
-  }
+  // Backward-compatible helper used by older call sites / tests.
+  return exportPosterAsset(false).then(asset=>asset.blob);
 }
 async function refreshPosterPreview(){
   const canvas=$('#posterCanvas'),image=$('#posterImage'),status=$('#posterSaveStatus');
   if(!canvas||!image||!status)return;
   canvas.hidden=false;image.hidden=true;
-  revokePosterPreviewUrl();
   image.removeAttribute('src');
-  status.textContent='正在生成可长按保存的预览图…';status.className='poster-save-status';
-  image.onload=()=>{image.hidden=false;canvas.hidden=true;status.textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';status.className='poster-save-status'};
+  const quark=isQuarkLike();
+  status.textContent=quark?'正在生成可长按保存的图片（夸克专用压缩）…':'正在生成可长按保存的预览图…';
+  status.className='poster-save-status';
+  image.onload=()=>{
+    image.hidden=false;canvas.hidden=true;
+    status.textContent=quark
+      ?'请长按上方图片 → 保存到相册。若无效请点“打开长按保存页”。'
+      :'可长按上方图片保存，或使用下方保存/分享。';
+    status.className='poster-save-status';
+  };
   image.onerror=()=>{
     image.removeAttribute('src');image.hidden=true;canvas.hidden=false;
-    status.textContent='夸克未能加载图片预览，已自动回退显示海报；请使用下方“保存或分享PNG / 打开大图”。';
+    status.textContent='预览加载失败，已回退显示海报。请点“打开长按保存页”。';
     status.className='poster-save-status error';
   };
   try{
-    const blob=await canvasToBlob();
-    const url=URL.createObjectURL(blob);
-    posterPreviewUrl=url;
-    image.src=url;
+    // Quark: force album-friendly JPEG data URL so long-press can write the gallery.
+    const asset=await exportPosterAsset(quark);
+    applyPosterImageSource(image,asset);
+    const btn=$('#downloadPosterBtn');
+    if(btn)btn.textContent=quark?'准备长按保存':'保存或分享图片';
   }catch(error){
     console.error('生成图片预览失败',error);
     if(typeof image.onerror==='function')image.onerror();
     else{
       canvas.hidden=false;image.hidden=true;
-      status.textContent=`预览失败：${error?.message||'请使用保存按钮'}`;status.className='poster-save-status error';
+      status.textContent=`预览失败：${error?.message||'请重试'}`;status.className='poster-save-status error';
     }
   }
 }
 function showPosterDialog(title){
   ensureRoundRect();
+  closePosterSaveLayer();
   $('#posterDialog .modal-head h3').textContent=title;
-  $('#posterSaveStatus').textContent='正在生成可长按保存的预览图…';
+  const quark=isQuarkLike();
+  $('#posterSaveStatus').textContent=quark?'正在生成可长按保存的图片（夸克专用压缩）…':'正在生成可长按保存的预览图…';
   $('#posterSaveStatus').className='poster-save-status';
   const canvas=$('#posterCanvas'),image=$('#posterImage');
   if(canvas)canvas.hidden=false;
   if(image){image.hidden=true;image.removeAttribute('src')}
+  const dl=$('#downloadPosterBtn'),op=$('#openPosterBtn');
+  if(dl)dl.textContent=quark?'准备长按保存':'保存或分享图片';
+  if(op)op.textContent=quark?'打开长按保存页':'打开大图 / 长按保存';
   $('#posterDialog').hidden=false;
   document.body.style.overflow='hidden';
   requestAnimationFrame(()=>{refreshPosterPreview().catch(err=>{console.error(err);toast(`预览失败：${err?.message||'请重试'}`)})});
@@ -724,6 +874,8 @@ function closePosterDialog(){
   $('#posterDialog').hidden=true;
   document.body.style.overflow='';
   revokePosterPreviewUrl();
+  closePosterSaveLayer();
+  posterExportCache=null;
   const image=$('#posterImage');
   if(image){image.removeAttribute('src');image.hidden=true}
 }
@@ -848,73 +1000,110 @@ function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');
 async function downloadPoster(){
   const button=$('#downloadPosterBtn'),status=$('#posterSaveStatus');
   if(!button||!status)return;
-  button.disabled=true;button.textContent='正在生成PNG…';
-  status.textContent='正在生成PNG…';status.className='poster-save-status';
+  button.disabled=true;
+  const quark=isQuarkLike();
+  button.textContent=quark?'正在准备…':'正在生成图片…';
+  status.textContent=quark?'正在生成可保存到相册的图片…':'正在生成图片…';
+  status.className='poster-save-status';
   try{
-    const blob=await canvasToBlob(),filename=posterFilename();
-    if(typeof File==='function'&&navigator.share&&navigator.canShare){
-      const file=new File([blob],filename,{type:'image/png'});
+    // On Quark, skip navigator.share(files): it often resolves canShare=true then instant AbortError.
+    const asset=await exportPosterAsset(quark);
+    const filename=posterFilenameFor(asset);
+
+    // Keep the dialog preview on an album-friendly source.
+    const image=$('#posterImage');
+    if(image){
+      image.onload=()=>{image.hidden=false;$('#posterCanvas').hidden=true};
+      applyPosterImageSource(image,asset);
+      image.hidden=false;
+    }
+
+    if(!quark&&typeof File==='function'&&navigator.share&&navigator.canShare){
+      const file=new File([asset.blob],filename,{type:asset.mime||'image/png'});
       let canShare=false;
       try{canShare=navigator.canShare({files:[file]})}catch(error){console.warn('文件分享能力检测失败',error)}
       if(canShare){
+        const started=Date.now();
         try{
           await navigator.share({files:[file],title:posterPrefix()});
           status.textContent='已打开系统分享面板，可保存到相册或发送给朋友。';
           status.className='poster-save-status success';
           return;
         }catch(error){
-          if(error?.name==='AbortError'){
+          // Instant Abort on some WebViews is a false cancel — fall through.
+          const elapsed=Date.now()-started;
+          if(error?.name==='AbortError'&&elapsed>600){
             status.textContent='已取消分享，仍可长按上方图片保存。';
             status.className='poster-save-status';
             return;
           }
-          console.warn('系统分享失败，改用下载方式',error);
+          console.warn('系统分享失败，改用其他方式',error);
         }
       }
     }
-    const url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download=filename;a.rel='noopener';a.target='_blank';a.style.display='none';
+
+    if(quark){
+      // Primary reliable path: fullscreen dataURL image for long-press album save.
+      await openPosterSaveLayer(asset);
+      status.textContent='已打开长按保存页。请长按大图 → 保存图片。';
+      status.className='poster-save-status success';
+      return;
+    }
+
+    // Non-Quark download attempt with object URL / data URL.
+    const href=asset.dataUrl||URL.createObjectURL(asset.blob);
+    const a=document.createElement('a');
+    a.href=href;a.download=filename;a.rel='noopener';a.target='_blank';a.style.display='none';
     document.body.appendChild(a);a.click();
-    setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},60000);
-    status.textContent='已发起PNG保存；如果夸克没有弹出下载，请长按上方图片或点“打开大图 / 长按保存”。';
+    setTimeout(()=>{a.remove();if(!asset.dataUrl)URL.revokeObjectURL(href)},60000);
+    status.textContent='已发起下载；如未开始请长按上方图片或打开长按保存页。';
     status.className='poster-save-status success';
   }catch(error){
-    console.error('保存PNG失败',error);
+    console.error('保存图片失败',error);
     status.textContent=`保存失败：${error?.message||'请长按上方图片保存'}`;
     status.className='poster-save-status error';
   }finally{
-    button.disabled=false;button.textContent='保存或分享PNG';
+    button.disabled=false;
+    button.textContent=isQuarkLike()?'准备长按保存':'保存或分享图片';
   }
 }
 async function openPosterImage(){
   const status=$('#posterSaveStatus');
-  // Open blank tab synchronously to beat popup blockers / Quark gesture rules.
-  const popup=window.open('about:blank','_blank');
-  status.textContent='正在打开大图…';status.className='poster-save-status';
+  const quark=isQuarkLike();
+  status.textContent=quark?'正在打开长按保存页…':'正在打开大图…';
+  status.className='poster-save-status';
   try{
-    const blob=await canvasToBlob(),url=URL.createObjectURL(blob);
+    const asset=await exportPosterAsset(true);
+    // Quark: in-page fullscreen layer beats window.open(blob/about:blank).
+    if(quark){
+      await openPosterSaveLayer(asset);
+      status.textContent='请在长按保存页里长按图片 → 保存到相册。';
+      status.className='poster-save-status success';
+      return;
+    }
+    const popup=window.open('about:blank','_blank');
+    let dataUrl=asset.dataUrl;
+    if(!dataUrl){
+      dataUrl=await new Promise((resolve,reject)=>{
+        const fr=new FileReader();
+        fr.onload=()=>resolve(fr.result);
+        fr.onerror=()=>reject(new Error('读取图片失败'));
+        fr.readAsDataURL(asset.blob);
+      });
+    }
     if(popup){
       const title=esc(posterPrefix());
       popup.document.open();
-      popup.document.write(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>html,body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0;line-height:1.5}img{display:block;width:100%;height:auto;-webkit-touch-callout:default;user-select:auto}</style><p>请长按下方图片，选择“保存图片”</p><img src="${url}" alt="${title}">`);
+      popup.document.write(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>html,body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0;line-height:1.5}img{display:block;width:100%;height:auto;-webkit-touch-callout:default;user-select:auto;-webkit-user-select:auto}</style><p>请长按下方图片，选择“保存图片”</p><img src="${dataUrl}" alt="${title}">`);
       popup.document.close();
       status.textContent='已打开大图，请在新页面长按图片保存。';
       status.className='poster-save-status success';
     }else{
-      // Fallback: put blob on the in-dialog image and ask for long-press.
-      const image=$('#posterImage');
-      if(image){
-        revokePosterPreviewUrl();
-        posterPreviewUrl=url;
-        image.onload=()=>{image.hidden=false;$('#posterCanvas').hidden=true};
-        image.src=url;image.hidden=false;
-        image.scrollIntoView({behavior:'smooth',block:'center'});
-      }
-      status.textContent='夸克拦截了新页面，请直接长按上方图片，选择“保存图片”。';
-      status.className='poster-save-status error';
+      await openPosterSaveLayer(asset);
+      status.textContent='弹窗被拦截，已改为页内长按保存。';
+      status.className='poster-save-status success';
     }
   }catch(error){
-    if(popup)try{popup.close()}catch(_){}
     console.error('打开大图失败',error);
     status.textContent='打开失败，请直接长按上方图片保存。';
     status.className='poster-save-status error';
@@ -936,4 +1125,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-poster1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-save2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
