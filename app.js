@@ -1236,4 +1236,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-http1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-http2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
