@@ -1,6 +1,6 @@
-const CACHE='football-workbench-v26';
+const CACHE='football-workbench-v28';
 const POSTER_CACHE='football-poster-temp-v1';
-const ASSETS=['./','./index.html','./styles.css?v=20260803-quark-http3','./combo-utils.js?v=20260803-quark-http3','./scan-utils.js?v=20260803-quark-http3','./review-utils.js?v=20260803-quark-http3','./app.js?v=20260803-quark-http3','./manifest.webmanifest','./icon.svg'];
+const ASSETS=['./','./index.html','./styles.css?v=20260803-quark-auto1','./combo-utils.js?v=20260803-quark-auto1','./scan-utils.js?v=20260803-quark-auto1','./review-utils.js?v=20260803-quark-auto1','./app.js?v=20260803-quark-auto1','./manifest.webmanifest','./icon.svg'];
 
 self.addEventListener('install',event=>event.waitUntil(
   caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())

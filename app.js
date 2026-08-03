@@ -228,6 +228,7 @@ async function ensureAlbumAsset(preferAlbum=false){
   return asset;
 }
 let posterSaveReady=null; // {httpUrl,dataUrl,blob,filename,mime,bytes}
+let posterAutoSaved=false;
 function openUrlInNewContext(url,filename=''){
   if(!url)return false;
   // Synchronous anchor click preserves user gesture better than window.open after await (Quark).
@@ -967,12 +968,12 @@ async function refreshPosterPreview(){
   canvas.hidden=false;image.hidden=true;
   image.removeAttribute('src');
   const quark=isQuarkLike();
-  status.textContent=quark?'正在生成可长按保存的图片（夸克专用压缩）…':'正在生成可长按保存的预览图…';
+  status.textContent=quark?'正在生成图片…':'正在生成预览图…';
   status.className='poster-save-status';
   image.onload=()=>{
     image.hidden=false;canvas.hidden=true;
     status.textContent=quark
-      ?'请长按上方图片；若相册没有，点“保存到相册”改用网页图片链接。'
+      ?'点下方「保存到相册」一次即可。也可长按上方预览图。'
       :'可长按上方图片保存，或使用下方保存/分享。';
     status.className='poster-save-status';
   };
@@ -986,7 +987,19 @@ async function refreshPosterPreview(){
     const asset=await ensureAlbumAsset(quark);
     applyPosterImageSource(image,asset);
     const btn=$('#downloadPosterBtn');
-    if(btn)btn.textContent=quark?'保存到相册':'保存或分享图片';
+    if(btn)btn.textContent=quark?'再保存一次':'保存或分享图片';
+    const openBtn=$('#openPosterBtn'); if(openBtn) openBtn.hidden=!!quark;
+    // Quark: auto-trigger the known-good download once so user only taps 生成.
+    if(quark&&!posterAutoSaved){
+      const href=asset.httpUrl||asset.dataUrl;
+      if(href){
+        posterAutoSaved=true;
+        openUrlInNewContext(href,posterFilenameFor(asset));
+        status.textContent='已自动开始保存。请到“下载/文件”或相册查看；失败再点「再保存一次」。';
+        status.className='poster-save-status success';
+      }
+    }
+
   }catch(error){
     console.error('生成图片预览失败',error);
     if(typeof image.onerror==='function')image.onerror();
@@ -998,17 +1011,18 @@ async function refreshPosterPreview(){
 }
 function showPosterDialog(title){
   ensureRoundRect();
+  posterAutoSaved=false;
   closePosterSaveLayer();
   $('#posterDialog .modal-head h3').textContent=title;
   const quark=isQuarkLike();
-  $('#posterSaveStatus').textContent=quark?'正在生成可长按保存的图片（夸克专用压缩）…':'正在生成可长按保存的预览图…';
+  $('#posterSaveStatus').textContent=quark?'正在生成图片…':'正在生成预览图…';
   $('#posterSaveStatus').className='poster-save-status';
   const canvas=$('#posterCanvas'),image=$('#posterImage');
   if(canvas)canvas.hidden=false;
   if(image){image.hidden=true;image.removeAttribute('src')}
   const dl=$('#downloadPosterBtn'),op=$('#openPosterBtn');
   if(dl)dl.textContent=quark?'保存到相册':'保存或分享图片';
-  if(op)op.textContent=quark?'新页面打开图片':'打开大图 / 长按保存';
+  if(op){op.textContent=quark?'保存到相册（备用）':'打开大图 / 长按保存';op.hidden=!!quark}
   $('#posterDialog').hidden=false;
   document.body.style.overflow='hidden';
   requestAnimationFrame(()=>{refreshPosterPreview().catch(err=>{console.error(err);toast(`预览失败：${err?.message||'请重试'}`)})});
@@ -1019,6 +1033,7 @@ function closePosterDialog(){
   revokePosterPreviewUrl();
   closePosterSaveLayer();
   posterExportCache=null;
+  posterAutoSaved=false;
   const image=$('#posterImage');
   if(image){image.removeAttribute('src');image.hidden=true}
 }
@@ -1145,8 +1160,8 @@ async function downloadPoster(){
   if(!button||!status)return;
   button.disabled=true;
   const quark=isQuarkLike();
-  button.textContent=quark?'正在准备…':'正在生成图片…';
-  status.textContent=quark?'正在生成可保存到相册的图片…':'正在生成图片…';
+  button.textContent=quark?'正在保存…':'正在生成图片…';
+  status.textContent=quark?'正在保存到下载/相册…':'正在生成图片…';
   status.className='poster-save-status';
   try{
     // On Quark, skip navigator.share(files): it often resolves canShare=true then instant AbortError.
@@ -1186,10 +1201,11 @@ async function downloadPoster(){
     }
 
     if(quark){
-      await openPosterSaveLayer(asset);
-      status.textContent=asset.httpUrl
-        ?'已打开保存页。夸克请优先点绿色「系统下载/打开」（你这边已验证可用）。'
-        :'已打开保存页。请优先点「系统下载/打开」。';
+      // One-tap path: the confirmed-working system download. No extra sheet.
+      const href=asset.httpUrl||asset.dataUrl;
+      if(!href)throw new Error('图片未就绪');
+      openUrlInNewContext(href,filename);
+      status.textContent='已开始保存。请到夸克“下载/文件”或系统相册查看。若没有，可长按上方预览图。';
       status.className='poster-save-status success';
       return;
     }
@@ -1208,7 +1224,7 @@ async function downloadPoster(){
     status.className='poster-save-status error';
   }finally{
     button.disabled=false;
-    button.textContent=isQuarkLike()?'保存到相册':'保存或分享图片';
+    button.textContent=isQuarkLike()?'再保存一次':'保存或分享图片';
   }
 }
 async function openPosterImage(){
@@ -1219,9 +1235,10 @@ async function openPosterImage(){
   try{
     const asset=await ensureAlbumAsset(true);
     if(quark){
-      // window.open after await is often ignored on Quark; save layer + native <a>/<download> works.
-      await openPosterSaveLayer(asset);
-      status.textContent='请优先点「系统下载/打开」；或点「新页面打开图片」。';
+      const href=asset.httpUrl||asset.dataUrl;
+      if(!href)throw new Error('图片未就绪');
+      openUrlInNewContext(href,posterFilenameFor(asset));
+      status.textContent='已开始保存。请到“下载/文件”或相册查看；也可长按上方预览图。';
       status.className='poster-save-status success';
       return;
     }
@@ -1278,4 +1295,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-http3',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-auto1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

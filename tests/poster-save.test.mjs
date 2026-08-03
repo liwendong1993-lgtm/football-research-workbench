@@ -77,3 +77,13 @@ test('保存页用原生链接打开并预填 URL，避免 await 后 window.open
   assert.match(app,/posterSaveReady/);
   assert.match(app,/系统下载\/打开/);
 });
+
+test('夸克保存一键直达系统下载，不强制多步保存页',()=>{
+  assert.match(app,/if\(quark\)\{[\s\S]*openUrlInNewContext\(href,filename\)/);
+  assert.doesNotMatch(app,/if\(quark\)\{\s*await openPosterSaveLayer\(asset\)/);
+});
+
+test('夸克生成预览后自动触发一次系统保存',()=>{
+  assert.match(app,/posterAutoSaved/);
+  assert.match(app,/已自动开始保存/);
+});
