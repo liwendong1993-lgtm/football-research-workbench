@@ -14,6 +14,46 @@ let editingId=null;
 let posterMode='detail';
 let posterReviewDate='';
 
+// Quark / older Chromium may miss CanvasRenderingContext2D.roundRect — polyfill path only.
+function ensureRoundRect(){
+  if(typeof CanvasRenderingContext2D==='undefined')return;
+  const proto=CanvasRenderingContext2D.prototype;
+  if(typeof proto.roundRect==='function')return;
+  proto.roundRect=function(x,y,w,h,radii=0){
+    let tl,tr,br,bl;
+    if(Array.isArray(radii)){
+      if(radii.length===1)tl=tr=br=bl=+radii[0]||0;
+      else if(radii.length===2){tl=br=+radii[0]||0;tr=bl=+radii[1]||0;}
+      else if(radii.length===3){tl=+radii[0]||0;tr=bl=+radii[1]||0;br=+radii[2]||0;}
+      else{tl=+radii[0]||0;tr=+radii[1]||0;br=+radii[2]||0;bl=+radii[3]||0;}
+    }else tl=tr=br=bl=+radii||0;
+    const min=Math.min(Math.abs(w),Math.abs(h))/2;
+    tl=Math.min(Math.max(0,tl),min);tr=Math.min(Math.max(0,tr),min);br=Math.min(Math.max(0,br),min);bl=Math.min(Math.max(0,bl),min);
+    this.moveTo(x+tl,y);
+    this.lineTo(x+w-tr,y);this.quadraticCurveTo(x+w,y,x+w,y+tr);
+    this.lineTo(x+w,y+h-br);this.quadraticCurveTo(x+w,y+h,x+w-br,y+h);
+    this.lineTo(x+bl,y+h);this.quadraticCurveTo(x,y+h,x,y+h-bl);
+    this.lineTo(x,y+tl);this.quadraticCurveTo(x,y,x+tl,y);
+    this.closePath();
+    return this;
+  };
+}
+ensureRoundRect();
+const POSTER_MAX_EDGE=4096;
+let posterPreviewUrl='';
+function revokePosterPreviewUrl(){if(posterPreviewUrl){try{URL.revokeObjectURL(posterPreviewUrl)}catch(_){}posterPreviewUrl=''}}
+function preparePosterCanvas(width,height){
+  const canvas=$('#posterCanvas');
+  const scale=Math.min(1,POSTER_MAX_EDGE/Math.max(1,width),POSTER_MAX_EDGE/Math.max(1,height));
+  canvas.width=Math.max(1,Math.floor(width*scale));
+  canvas.height=Math.max(1,Math.floor(height*scale));
+  const ctx=canvas.getContext('2d');
+  if(!ctx)throw new Error('Canvas不可用');
+  ctx.setTransform(scale,0,0,scale,0,0);
+  ctx.imageSmoothingEnabled=true;
+  return {canvas,ctx,scale,width,height};
+}
+
 const $=s=>document.querySelector(s);
 const $$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -613,10 +653,80 @@ function renderHistory(){renderReview()}
 function wrapText(ctx,text,maxWidth){const chars=[...String(text)],lines=[];let line='';for(const c of chars){if(ctx.measureText(line+c).width>maxWidth&&line){lines.push(line);line=c}else line+=c}if(line)lines.push(line);return lines}
 function posterPrefix(){return posterMode==='scan'?'全部扫盘':posterMode==='review'?'复盘对照':posterMode==='combo'?'单条方案':'足球研究'}
 function posterFilename(){return `${posterPrefix()}-${posterMode==='review'?(posterReviewDate||state.activeDate):state.activeDate}.png`}
-function canvasToBlob(){const canvas=$('#posterCanvas');return new Promise((resolve,reject)=>{if(typeof canvas.toBlob==='function')canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('图片转换失败')),'image/png');else try{const data=atob(canvas.toDataURL('image/png').split(',')[1]),bytes=new Uint8Array(data.length);for(let i=0;i<data.length;i++)bytes[i]=data.charCodeAt(i);resolve(new Blob([bytes],{type:'image/png'}))}catch(error){reject(error)}})}
-function refreshPosterPreview(){const canvas=$('#posterCanvas'),image=$('#posterImage'),status=$('#posterSaveStatus');canvas.hidden=false;image.hidden=true;image.onload=()=>{image.hidden=false;canvas.hidden=true};image.onerror=()=>{image.removeAttribute('src');image.hidden=true;canvas.hidden=false;status.textContent='夸克未能加载图片预览，已自动回退显示海报；请使用下方保存按钮。';status.className='poster-save-status error'};try{image.src=canvas.toDataURL('image/png')}catch(error){console.error('生成图片预览失败',error);image.onerror()}}
-function showPosterDialog(title){$('#posterDialog .modal-head h3').textContent=title;$('#posterSaveStatus').textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';$('#posterSaveStatus').className='poster-save-status';$('#posterDialog').hidden=false;document.body.style.overflow='hidden';refreshPosterPreview()}
-function closePosterDialog(){$('#posterDialog').hidden=true;document.body.style.overflow=''}
+function canvasToBlob(){
+  const canvas=$('#posterCanvas');
+  return new Promise((resolve,reject)=>{
+    try{
+      if(!canvas||!canvas.width||!canvas.height)return reject(new Error('海报尚未生成'));
+      if(typeof canvas.toBlob==='function'){
+        let settled=false;
+        const timer=setTimeout(()=>{if(!settled){settled=true;fallbackDataUrl(resolve,reject)}},8000);
+        canvas.toBlob(blob=>{
+          if(settled)return;
+          if(blob){settled=true;clearTimeout(timer);resolve(blob)}
+          else{settled=true;clearTimeout(timer);fallbackDataUrl(resolve,reject)}
+        },'image/png');
+      }else fallbackDataUrl(resolve,reject);
+    }catch(error){reject(error)}
+  });
+  function fallbackDataUrl(resolve,reject){
+    try{
+      const dataUrl=canvas.toDataURL('image/png');
+      if(!dataUrl||dataUrl==='data:,')throw new Error('图片转换失败');
+      const raw=dataUrl.split(',')[1];
+      if(!raw)throw new Error('图片转换失败');
+      const data=atob(raw),bytes=new Uint8Array(data.length);
+      for(let i=0;i<data.length;i++)bytes[i]=data.charCodeAt(i);
+      resolve(new Blob([bytes],{type:'image/png'}));
+    }catch(error){reject(error)}
+  }
+}
+async function refreshPosterPreview(){
+  const canvas=$('#posterCanvas'),image=$('#posterImage'),status=$('#posterSaveStatus');
+  if(!canvas||!image||!status)return;
+  canvas.hidden=false;image.hidden=true;
+  revokePosterPreviewUrl();
+  image.removeAttribute('src');
+  status.textContent='正在生成可长按保存的预览图…';status.className='poster-save-status';
+  image.onload=()=>{image.hidden=false;canvas.hidden=true;status.textContent='安卓夸克用户可直接长按上方图片保存，或使用下方系统分享。';status.className='poster-save-status'};
+  image.onerror=()=>{
+    image.removeAttribute('src');image.hidden=true;canvas.hidden=false;
+    status.textContent='夸克未能加载图片预览，已自动回退显示海报；请使用下方“保存或分享PNG / 打开大图”。';
+    status.className='poster-save-status error';
+  };
+  try{
+    const blob=await canvasToBlob();
+    const url=URL.createObjectURL(blob);
+    posterPreviewUrl=url;
+    image.src=url;
+  }catch(error){
+    console.error('生成图片预览失败',error);
+    if(typeof image.onerror==='function')image.onerror();
+    else{
+      canvas.hidden=false;image.hidden=true;
+      status.textContent=`预览失败：${error?.message||'请使用保存按钮'}`;status.className='poster-save-status error';
+    }
+  }
+}
+function showPosterDialog(title){
+  ensureRoundRect();
+  $('#posterDialog .modal-head h3').textContent=title;
+  $('#posterSaveStatus').textContent='正在生成可长按保存的预览图…';
+  $('#posterSaveStatus').className='poster-save-status';
+  const canvas=$('#posterCanvas'),image=$('#posterImage');
+  if(canvas)canvas.hidden=false;
+  if(image){image.hidden=true;image.removeAttribute('src')}
+  $('#posterDialog').hidden=false;
+  document.body.style.overflow='hidden';
+  requestAnimationFrame(()=>{refreshPosterPreview().catch(err=>{console.error(err);toast(`预览失败：${err?.message||'请重试'}`)})});
+}
+function closePosterDialog(){
+  $('#posterDialog').hidden=true;
+  document.body.style.overflow='';
+  revokePosterPreviewUrl();
+  const image=$('#posterImage');
+  if(image){image.removeAttribute('src');image.hidden=true}
+}
 function drawFitText(ctx,text,x,y,maxWidth,startSize=24,minSize=14,weight=700){let size=startSize;do{ctx.font=`${weight} ${size}px sans-serif`;if(ctx.measureText(String(text)).width<=maxWidth)break;size-=1}while(size>minSize);ctx.fillText(String(text),x,y)}
 function comboPosterGroups(item,match){
   const order=['spf','hhad','goals','scores'];
@@ -630,7 +740,7 @@ function comboPosterGroups(item,match){
 function drawSingleComboPoster(combo){
   const items=enforceSingleMarketPerMatch(combo?.items||[]);if(!items.length){toast('方案没有可生成的比赛');return false}
   const prize=schemePrizeRange(items,2,combo?.multiple),metrics=comboMetrics(items),rows=items.map(item=>{const match=state.matches.find(m=>m.id===item.matchId)||{},groups=comboPosterGroups(item,match);return {item,match,groups,height:120+groups.reduce((n,g)=>n+g.lines*72,0)}});
-  const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d'),width=1080,height=430+rows.reduce((n,r)=>n+r.height,0)+190;canvas.width=width;canvas.height=height;
+  const width=1080,height=430+rows.reduce((n,r)=>n+r.height,0)+190;const {canvas,ctx}=preparePosterCanvas(width,height);
   const head=ctx.createLinearGradient(0,0,width,260);head.addColorStop(0,'#b90f1c');head.addColorStop(1,'#e62b32');ctx.fillStyle='#f6f7f9';ctx.fillRect(0,0,width,height);ctx.fillStyle=head;ctx.fillRect(0,0,width,260);
   ctx.save();ctx.globalAlpha=.13;ctx.strokeStyle='#fff';ctx.lineWidth=4;for(const [x,y,r] of [[60,220,95],[880,65,125],[980,235,70]]){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.stroke()}ctx.restore();
   ctx.fillStyle='#fff';ctx.font='800 30px sans-serif';ctx.fillText(state.settings.author||'足球研究员',48,58);ctx.font='900 58px sans-serif';drawFitText(ctx,combo.name||'单条方案',48,142,800,58,34,900);ctx.font='26px sans-serif';ctx.fillStyle='rgba(255,255,255,.88)';ctx.fillText(`${fmtDate(state.activeDate)} · 方案生成 ${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}`,50,194);
@@ -649,13 +759,13 @@ function drawSingleComboPoster(combo){
   let y=430;rows.forEach(({item,match,groups,height:rowH})=>{ctx.fillStyle='#fff';ctx.fillRect(0,y,width,rowH-3);ctx.strokeStyle='#e5e7eb';ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();ctx.fillStyle='#3192bd';roundRect(ctx,38,y+28,132,52,7);ctx.fillStyle='#fff';ctx.font='900 30px sans-serif';ctx.textAlign='center';ctx.fillText(String(item.num||'').replace(/\D/g,'').slice(-3)||item.num,104,y+64);ctx.fillStyle='#7b818a';ctx.font='22px sans-serif';ctx.fillText(match.league||'足球',104,y+108);ctx.textAlign='left';ctx.fillStyle='#25282d';ctx.font='800 31px sans-serif';drawFitText(ctx,`${item.home}  VS  ${item.away}`,210,y+48,815,31,20,800);ctx.fillStyle='#8a9098';ctx.font='22px sans-serif';ctx.fillText(`${match.time||''}  ·  ${itemMarketLabel(item)}`,210,y+82);let groupY=y+100;groups.forEach(group=>{const gap=8,totalW=755,boxW=(totalW-gap*(group.cols-1))/group.cols,badgeColor=group.market==='spf'?'#cfd2d5':group.market==='hhad'?(Number(group.lineLabel)>0?'#70c978':'#ef8a8d'):'#3192bd';ctx.fillStyle=badgeColor;ctx.beginPath();ctx.roundRect(210,groupY,58,58,29);ctx.fill();ctx.fillStyle='#fff';ctx.font='900 19px sans-serif';ctx.textAlign='center';drawFitText(ctx,group.lineLabel,239,groupY+37,48,19,12,900);group.options.forEach((o,i)=>{const row=Math.floor(i/group.cols),col=i%group.cols,x=278+col*(boxW+gap),oy=groupY+row*72;ctx.fillStyle=o.selected?'#d80e19':'#f7f7f7';ctx.strokeStyle=o.selected?'#d80e19':'#d8dadd';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(x,oy,boxW,58,5);ctx.fill();ctx.stroke();ctx.fillStyle=o.selected?'#fff':'#42464c';ctx.font='800 24px sans-serif';const odd=o.odd>0?o.odd.toFixed(2):'--';drawFitText(ctx,`${o.label}  ${odd}`,x+boxW/2,oy+38,boxW-14,24,16,800)});ctx.textAlign='left';groupY+=group.lines*72});y+=rowH});
   ctx.fillStyle='#fff3e8';ctx.fillRect(0,y,width,height-y);ctx.fillStyle='#6f6259';ctx.font='23px sans-serif';wrapText(ctx,state.settings.disclaimer,980).slice(0,3).forEach((line,i)=>ctx.fillText(line,48,y+56+i*34));ctx.fillStyle='#b90f1c';ctx.font='800 22px sans-serif';ctx.fillText('胜平负与让球可同场组合 · 进球数/比分独立 · 请理性研究',48,height-40);return true
 }
-function showSingleComboPoster(combo){posterMode='combo';if(!drawSingleComboPoster(combo))return;showPosterDialog('单条方案图预览')}
+function showSingleComboPoster(combo){posterMode='combo';try{ensureRoundRect();if(!drawSingleComboPoster(combo))return;showPosterDialog('单条方案图预览')}catch(error){console.error('生成方案图失败',error);toast(`生成方案图失败：${error?.message||'请重试'}`)}}
 function drawScanPoster(){
   const matches=sortMatchesBySequence(state.matches.filter(m=>m.businessDate===state.activeDate));
   if(!matches.length){toast('当前日期没有比赛');return false}
   const rows=matches.map(m=>formatScanRow(m,draftFor(m.id))),edited=rows.filter(r=>r.edited).length;
-  const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d'),width=1200,rowH=104,tableY=390,height=tableY+62+rows.length*rowH+240;
-  canvas.width=width;canvas.height=height;
+  const width=1200,rowH=104,tableY=390,height=tableY+62+rows.length*rowH+240;
+  const {canvas,ctx}=preparePosterCanvas(width,height);
   const bg=ctx.createLinearGradient(0,0,0,height);bg.addColorStop(0,'#061528');bg.addColorStop(.32,'#092a36');bg.addColorStop(1,'#053224');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
   ctx.save();ctx.globalAlpha=.12;ctx.strokeStyle='#79d8ff';ctx.lineWidth=3;for(let i=-300;i<1500;i+=170){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i+440,350);ctx.stroke()}ctx.beginPath();ctx.arc(930,125,150,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(930,125,86,0,Math.PI*2);ctx.stroke();ctx.restore();
   ctx.fillStyle='#ff6f3d';ctx.font='900 58px sans-serif';ctx.fillText('老花今日',42,88);ctx.fillStyle='#f6c851';ctx.font='700 28px sans-serif';ctx.fillText(`${fmtDate(state.activeDate)} ${weekday(state.activeDate)}`,850,78);
@@ -667,7 +777,7 @@ function drawScanPoster(){
   const footerY=tableY+62+rows.length*rowH+46;ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(42,footerY-14);ctx.lineTo(1158,footerY-14);ctx.stroke();ctx.fillStyle='#fff';ctx.font='italic 900 38px sans-serif';ctx.fillText('看赛事 · 做记录 · 理性研究',42,footerY+45);ctx.fillStyle='#9fb8b0';ctx.font='22px sans-serif';wrapText(ctx,state.settings.disclaimer,1080).slice(0,2).forEach((line,i)=>ctx.fillText(line,42,footerY+92+i*30));ctx.fillStyle='#f6c851';ctx.font='700 19px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,42,height-34);
   return true;
 }
-function showScanPoster(){posterMode='scan';posterReviewDate='';if(!drawScanPoster())return;showPosterDialog('全部扫盘图预览')}
+function showScanPoster(){posterMode='scan';posterReviewDate='';try{ensureRoundRect();if(!drawScanPoster())return;showPosterDialog('全部扫盘图预览')}catch(error){console.error('生成扫盘图失败',error);toast(`生成扫盘图失败：${error?.message||'请重试'}`)}}
 function drawColoredTokens(ctx,tokens,x,y,maxWidth,align='center'){
   const parts=(tokens&&tokens.length)?tokens:[{text:'—',hit:false}];
   const gap=6;let size=23;
@@ -683,8 +793,8 @@ function drawReviewPoster(date){
   if(!matches.length){toast('这一天没有可复盘的比赛');return false}
   const rows=matches.map(m=>formatReviewScanRow(m,draftFor(m.id),optionWins));
   const summary=summarizeDay(matches,state.drafts,optionWins);
-  const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d'),width=1200,rowH=112,tableY=390,height=tableY+62+rows.length*rowH+240;
-  canvas.width=width;canvas.height=height;
+  const width=1200,rowH=112,tableY=390,height=tableY+62+rows.length*rowH+240;
+  const {canvas,ctx}=preparePosterCanvas(width,height);
   const bg=ctx.createLinearGradient(0,0,0,height);bg.addColorStop(0,'#1a0a10');bg.addColorStop(.3,'#2a0f14');bg.addColorStop(1,'#12080c');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
   ctx.fillStyle='#ff4d4f';ctx.font='900 58px sans-serif';ctx.fillText('老花复盘',42,88);ctx.fillStyle='#f6c851';ctx.font='700 28px sans-serif';ctx.fillText(`${fmtDate(date)} ${weekday(date)}`,850,78);
   ctx.fillStyle='#fff';ctx.font='900 72px sans-serif';ctx.fillText('赛果对照扫盘',42,190);ctx.fillStyle='#ffb4b4';ctx.font='800 28px sans-serif';ctx.fillText('命中选项红色高亮',46,242);
@@ -720,23 +830,96 @@ function drawReviewPoster(date){
   const footerY=tableY+62+rows.length*rowH+46;ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(42,footerY-14);ctx.lineTo(1158,footerY-14);ctx.stroke();ctx.fillStyle='#fff';ctx.font='italic 900 36px sans-serif';ctx.fillText('复盘对照 · 命中标红 · 理性研究',42,footerY+45);ctx.fillStyle='#c7a0a0';ctx.font='22px sans-serif';wrapText(ctx,state.settings.disclaimer,1080).slice(0,2).forEach((line,i)=>ctx.fillText(line,42,footerY+92+i*30));ctx.fillStyle='#f6c851';ctx.font='700 19px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,42,height-34);
   return true;
 }
-function showReviewPoster(date){posterMode='review';posterReviewDate=date;if(!drawReviewPoster(date))return;showPosterDialog(`${fmtDate(date)} 复盘图预览`)}
+function showReviewPoster(date){posterMode='review';posterReviewDate=date;try{ensureRoundRect();if(!drawReviewPoster(date))return;showPosterDialog(`${fmtDate(date)} 复盘图预览`)}catch(error){console.error('生成复盘图失败',error);toast(`生成复盘图失败：${error?.message||'请重试'}`)}}
 function drawPoster(report){
   posterMode='detail';$('#posterDialog .modal-head h3').textContent='详细研究长图预览';
   const date=report?.date||state.activeDate,matches=report?.matches||selectedMatches(),drafts=report?.drafts||state.drafts,combos=report?.combos||state.combos[date]||[];
   const rows=matches.map(m=>{const d=drafts[m.id]||draftFor(m.id);let parts=[];if(d.spf?.length)parts.push(`胜平负 ${d.spf.map(x=>pickLabel('spf',x)).join('/')}`);if(d.hhad?.length)parts.push(`${m.hhad?.goalLine||'让球'} ${d.hhad.map(x=>pickLabel('hhad',x)).join('/')}`);if(d.goals?.length)parts.push(`进球 ${d.goals.join('/')}`);if(d.scores)parts.push(`比分 ${d.scores}`);return {m,d,parts}});
   const height=480+rows.reduce((n,r)=>n+180+(r.d.note?70:0),0)+combos.length*200+180;
-  const canvas=$('#posterCanvas'),ctx=canvas.getContext('2d');canvas.width=1080;canvas.height=height;
+  const {canvas,ctx}=preparePosterCanvas(1080,height);
   const grad=ctx.createLinearGradient(0,0,1080,height);grad.addColorStop(0,'#091523');grad.addColorStop(1,'#102b45');ctx.fillStyle=grad;ctx.fillRect(0,0,1080,height);
   ctx.fillStyle='#f6c851';ctx.fillRect(64,60,72,8);ctx.font='700 28px sans-serif';ctx.fillText('FOOTBALL RESEARCH',64,120);ctx.fillStyle='#ffffff';ctx.font='900 66px sans-serif';ctx.fillText(state.settings.author||'足球研究员',64,205);ctx.fillStyle='#9fb1c7';ctx.font='34px sans-serif';ctx.fillText(`${date}  ${weekday(date)}足球研究`,64,265);
   let y=345;rows.forEach(({m,d,parts},idx)=>{ctx.fillStyle='rgba(255,255,255,.06)';roundRect(ctx,48,y-40,984,140+(d.note?70:0),24);ctx.fillStyle=d.confidence==='主推'?'#f6c851':'#6faeff';ctx.font='800 27px sans-serif';ctx.fillText(`${m.num} · ${m.league}${d.confidence?` · ${d.confidence}`:''}`,76,y);ctx.fillStyle='#fff';ctx.font='900 35px sans-serif';ctx.fillText(`${m.home}  VS  ${m.away}`,76,y+50);ctx.fillStyle='#c4d1e1';ctx.font='28px sans-serif';ctx.fillText(parts.join('　')||'已记录分析',76,y+94);if(d.note){ctx.fillStyle='#8fa1b8';ctx.font='24px sans-serif';const lines=wrapText(ctx,d.note,900).slice(0,2);lines.forEach((line,i)=>ctx.fillText(line,76,y+137+i*31))}y+=180+(d.note?70:0)});
   if(combos.length){ctx.fillStyle='#f6c851';ctx.font='900 34px sans-serif';ctx.fillText('今日组合',64,y+10);y+=65;combos.forEach(c=>{const items=enforceSingleMarketPerMatch(c.items),prize=schemePrizeRange(items,2,c.multiple),selection=items.map(x=>`${x.num}[${itemMarketLabel(x)}：${x.options.map(o=>optionText(o.label)).join('/')}]`).join(' × ');ctx.fillStyle='rgba(246,200,81,.10)';roundRect(ctx,48,y-35,984,165,20);ctx.fillStyle='#fff';ctx.font='800 29px sans-serif';ctx.fillText(c.name,72,y+5);ctx.fillStyle='#c4d1e1';ctx.font='24px sans-serif';wrapText(ctx,selection,880).slice(0,2).forEach((line,i)=>ctx.fillText(line,72,y+43+i*29));ctx.fillStyle='#f6c851';ctx.font='700 22px sans-serif';ctx.fillText(`${prize.tickets}注 · ${prize.multiple}倍 · 每注2元 · 投注金额 ¥${prize.cost.toFixed(2)}`,72,y+91);ctx.fillStyle='#fff';ctx.fillText(`理论总返奖 ¥${prize.minPrize.toFixed(2)}–¥${prize.maxPrize.toFixed(2)}`,72,y+121);y+=200})}
   ctx.strokeStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.moveTo(64,height-155);ctx.lineTo(1016,height-155);ctx.stroke();ctx.fillStyle='#9fb1c7';ctx.font='23px sans-serif';wrapText(ctx,state.settings.disclaimer,940).slice(0,2).forEach((line,i)=>ctx.fillText(line,64,height-105+i*32));ctx.fillStyle='#f6c851';ctx.font='700 20px sans-serif';ctx.fillText(`生成时间 ${new Date().toLocaleString('zh-CN')}`,64,height-36);
 }
-function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
-function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');return}drawPoster();showPosterDialog('详细研究长图预览')}
-async function downloadPoster(){const button=$('#downloadPosterBtn'),status=$('#posterSaveStatus');button.disabled=true;button.textContent='正在生成PNG…';try{const blob=await canvasToBlob(),filename=posterFilename();if(typeof File==='function'&&navigator.share&&navigator.canShare){const file=new File([blob],filename,{type:'image/png'});let canShare=false;try{canShare=navigator.canShare({files:[file]})}catch(error){console.warn('文件分享能力检测失败',error)}if(canShare){try{await navigator.share({files:[file],title:posterPrefix()});status.textContent='已打开系统分享面板，可保存到相册或发送给朋友。';status.className='poster-save-status success';return}catch(error){if(error?.name==='AbortError'){status.textContent='已取消分享，仍可长按上方图片保存。';return}console.warn('系统分享失败，改用下载方式',error)}}}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);status.textContent='已发起PNG下载；如果夸克没有弹出下载，请点击“打开大图 / 长按保存”。';status.className='poster-save-status success'}catch(error){console.error('保存PNG失败',error);status.textContent=`保存失败：${error?.message||'请使用长按图片保存'}`;status.className='poster-save-status error'}finally{button.disabled=false;button.textContent='保存或分享PNG'}}
-async function openPosterImage(){const status=$('#posterSaveStatus'),popup=window.open('about:blank','_blank');try{const blob=await canvasToBlob(),url=URL.createObjectURL(blob);if(popup){popup.document.open();popup.document.write(`<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(posterPrefix())}</title><style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0}img{display:block;width:100%;height:auto;-webkit-touch-callout:default}</style><p>请长按下方图片，选择“保存图片”</p><img src="${url}" alt="${esc(posterPrefix())}">`);popup.document.close();status.textContent='已打开大图，请在新页面长按图片保存。';status.className='poster-save-status success'}else{$('#posterImage').scrollIntoView({behavior:'smooth',block:'center'});status.textContent='夸克拦截了新页面，请直接长按上方图片，选择“保存图片”。';status.className='poster-save-status error'}}catch(error){if(popup)popup.close();console.error('打开大图失败',error);status.textContent='打开失败，请直接长按上方图片保存。';status.className='poster-save-status error'}}
+function roundRect(ctx,x,y,w,h,r){ensureRoundRect();ctx.beginPath();if(typeof ctx.roundRect==='function')ctx.roundRect(x,y,w,h,r);else{const rr=+r||0;ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath()}ctx.fill()}
+function showPoster(){if(!selectedMatches().length){toast('请先编辑比赛');return}try{ensureRoundRect();drawPoster();showPosterDialog('详细研究长图预览')}catch(error){console.error('生成研究长图失败',error);toast(`生成研究长图失败：${error?.message||'请重试'}`)}}
+async function downloadPoster(){
+  const button=$('#downloadPosterBtn'),status=$('#posterSaveStatus');
+  if(!button||!status)return;
+  button.disabled=true;button.textContent='正在生成PNG…';
+  status.textContent='正在生成PNG…';status.className='poster-save-status';
+  try{
+    const blob=await canvasToBlob(),filename=posterFilename();
+    if(typeof File==='function'&&navigator.share&&navigator.canShare){
+      const file=new File([blob],filename,{type:'image/png'});
+      let canShare=false;
+      try{canShare=navigator.canShare({files:[file]})}catch(error){console.warn('文件分享能力检测失败',error)}
+      if(canShare){
+        try{
+          await navigator.share({files:[file],title:posterPrefix()});
+          status.textContent='已打开系统分享面板，可保存到相册或发送给朋友。';
+          status.className='poster-save-status success';
+          return;
+        }catch(error){
+          if(error?.name==='AbortError'){
+            status.textContent='已取消分享，仍可长按上方图片保存。';
+            status.className='poster-save-status';
+            return;
+          }
+          console.warn('系统分享失败，改用下载方式',error);
+        }
+      }
+    }
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=filename;a.rel='noopener';a.target='_blank';a.style.display='none';
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},60000);
+    status.textContent='已发起PNG保存；如果夸克没有弹出下载，请长按上方图片或点“打开大图 / 长按保存”。';
+    status.className='poster-save-status success';
+  }catch(error){
+    console.error('保存PNG失败',error);
+    status.textContent=`保存失败：${error?.message||'请长按上方图片保存'}`;
+    status.className='poster-save-status error';
+  }finally{
+    button.disabled=false;button.textContent='保存或分享PNG';
+  }
+}
+async function openPosterImage(){
+  const status=$('#posterSaveStatus');
+  // Open blank tab synchronously to beat popup blockers / Quark gesture rules.
+  const popup=window.open('about:blank','_blank');
+  status.textContent='正在打开大图…';status.className='poster-save-status';
+  try{
+    const blob=await canvasToBlob(),url=URL.createObjectURL(blob);
+    if(popup){
+      const title=esc(posterPrefix());
+      popup.document.open();
+      popup.document.write(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>html,body{margin:0;background:#111;color:#fff;font-family:sans-serif;text-align:center}p{padding:12px;margin:0;line-height:1.5}img{display:block;width:100%;height:auto;-webkit-touch-callout:default;user-select:auto}</style><p>请长按下方图片，选择“保存图片”</p><img src="${url}" alt="${title}">`);
+      popup.document.close();
+      status.textContent='已打开大图，请在新页面长按图片保存。';
+      status.className='poster-save-status success';
+    }else{
+      // Fallback: put blob on the in-dialog image and ask for long-press.
+      const image=$('#posterImage');
+      if(image){
+        revokePosterPreviewUrl();
+        posterPreviewUrl=url;
+        image.onload=()=>{image.hidden=false;$('#posterCanvas').hidden=true};
+        image.src=url;image.hidden=false;
+        image.scrollIntoView({behavior:'smooth',block:'center'});
+      }
+      status.textContent='夸克拦截了新页面，请直接长按上方图片，选择“保存图片”。';
+      status.className='poster-save-status error';
+    }
+  }catch(error){
+    if(popup)try{popup.close()}catch(_){}
+    console.error('打开大图失败',error);
+    status.textContent='打开失败，请直接长按上方图片保存。';
+    status.className='poster-save-status error';
+  }
+}
 
 function renderSettings(){$('#authorInput').value=state.settings.author||'';$('#disclaimerInput').value=state.settings.disclaimer||''}
 function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`足球研究工作台备份-${todayChina()}.json`;a.click();URL.revokeObjectURL(a.href);toast('备份已导出')}
@@ -753,4 +936,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260731-scan-sequence1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-poster1',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);

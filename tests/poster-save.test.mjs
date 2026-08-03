@@ -37,3 +37,13 @@ test('支持文件分享时优先调用安卓系统分享面板',()=>{
   assert.match(app,/navigator\.share/);
   assert.match(app,/new File/);
 });
+
+test('夸克预览优先 Blob URL，并提供 roundRect 与超高画布保护',()=>{
+  assert.match(app,/URL\.createObjectURL\(blob\)/);
+  assert.match(app,/function ensureRoundRect/);
+  assert.match(app,/function preparePosterCanvas/);
+  assert.match(app,/POSTER_MAX_EDGE/);
+  assert.match(app,/revokePosterPreviewUrl/);
+  assert.match(app,/生成扫盘图失败/);
+  assert.match(app,/生成方案图失败/);
+});

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>poster quark smoke</title>
+  <style>
+    body{font-family:sans-serif;background:#111;color:#eee;padding:16px}
+    #posterDialog{position:fixed;inset:0;background:#0c1827;padding:12px;overflow:auto}
+    #posterDialog[hidden]{display:none}
+    #posterCanvas,.poster-image{max-width:100%;background:#fff}
+    button{margin:6px;padding:10px 14px}
+    #log{white-space:pre-wrap;background:#222;padding:12px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <h1>Poster Quark Smoke</h1>
+  <div id="log">boot…</div>
+  <div id="posterDialog" class="poster-dialog" hidden>
+    <div class="poster-backdrop" data-close-poster></div>
+    <div class="poster-modal">
+      <div class="modal-head"><h3>preview</h3><button type="button" id="closePosterBtn">×</button></div>
+      <canvas id="posterCanvas" class="poster-source-canvas"></canvas>
+      <img id="posterImage" class="poster-image" hidden alt="preview" />
+      <p id="posterSaveStatus" class="poster-save-status" aria-live="polite"></p>
+      <button type="button" id="downloadPosterBtn" class="primary full">保存或分享PNG</button>
+      <button type="button" id="openPosterBtn" class="secondary full">打开大图 / 长按保存</button>
+    </div>
+  </div>
+  <!-- shell bits app.js expects at bind time -->
+  <div class="app-shell" style="display:none">
+    <header class="topbar"><button id="refreshBtn"></button></header>
+    <main>
+      <section class="page active" id="todayPage">
+        <span id="dataStatus"></span><strong id="heroTitle"></strong>
+        <strong id="editedCount"></strong><span id="totalCount"></span>
+        <div id="dateStrip"></div><div id="filterBar"><button class="active" data-filter="all"></button></div>
+        <button id="manualAddBtn"></button><div id="matchList"></div>
+      </section>
+      <section class="page" id="plansPage">
+        <button id="addComboBtn"></button><div id="comboList"></div>
+        <button id="scanPosterBtn"></button><button id="posterBtn"></button>
+      </section>
+      <section class="page" id="reviewPage">
+        <span id="reviewMeta"></span><strong id="reviewHeroTitle"></strong>
+        <strong id="reviewEditedCount"></strong><span id="reviewTotalCount"></span><strong id="reviewHitCount"></strong>
+        <div id="reviewDateStrip"></div><button id="reviewPosterBtn"></button><div id="reviewMatchList"></div>
+      </section>
+      <section class="page" id="settingsPage">
+        <input id="authorInput" /><textarea id="disclaimerInput"></textarea>
+        <button id="saveSettingsBtn"></button><button id="exportBtn"></button>
+        <input id="importInput" type="file" /><button id="clearBtn"></button>
+      </section>
+    </main>
+    <nav class="bottom-nav">
+      <button class="active" data-page="todayPage"></button>
+      <button data-page="plansPage"></button>
+      <button data-page="reviewPage"></button>
+      <button data-page="settingsPage"></button>
+    </nav>
+  </div>
+  <div class="toast" id="toast"></div>
+  <dialog id="editDialog"><form method="dialog" id="editForm"><div id="editContent"></div></form></dialog>
+  <dialog id="comboDialog"><form method="dialog" id="comboForm"><div id="comboContent"></div></form></dialog>
+  <dialog id="manualDialog"><form method="dialog" id="manualForm"><div id="manualContent"></div></form></dialog>
+  <script src="../combo-utils.js"></script>
+  <script src="../scan-utils.js"></script>
+  <script src="../review-utils.js"></script>
+  <script>
+    // Block network fetch during smoke
+    const _fetch = window.fetch;
+    window.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('sporttery')) {
+        return new Response(JSON.stringify({success:true,value:{matchInfoList:[]}}), {headers:{'Content-Type':'application/json'}});
+      }
+      return _fetch(input);
+    };
+    // Optionally strip native roundRect to prove polyfill path.
+    const strip = new URLSearchParams(location.search).get('stripRoundRect') === '1';
+    if (strip && window.CanvasRenderingContext2D) {
+      try { delete CanvasRenderingContext2D.prototype.roundRect; } catch (_) {
+        CanvasRenderingContext2D.prototype.roundRect = undefined;
+      }
+      // force undefined
+      Object.defineProperty(CanvasRenderingContext2D.prototype, 'roundRect', {value:undefined, configurable:true, writable:true});
+    }
+  </script>
+  <script src="../app.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (m) => { logEl.textContent += '\n' + m; console.log(m); };
+    (async () => {
+      try {
+        // seed state
+        const today = (window.chinaDateKey ? chinaDateKey(new Date()) : new Date().toISOString().slice(0,10));
+        const matches = [];
+        for (let i = 1; i <= 36; i++) {
+          const n = String(i).padStart(3,'0');
+          matches.push({
+            id: 'm'+i, num: '周日'+n, businessDate: today, time: '12:'+String(i%60).padStart(2,'0'),
+            league: '测试联赛', home: '主队'+i, away: '客队'+i,
+            hhad: {goalLine: '-1'}, had: {h:'1.5',d:'3.2',a:'5.1'},
+            status: 'Selling'
+          });
+        }
+        state.matches = matches;
+        state.activeDate = today;
+        state.drafts = {
+          m1: {spf:['h'], hhad:['h'], goals:['2'], scores:'2:1', confidence:'主推', note:'smoke'},
+          m2: {spf:['d'], hhad:[], goals:['1'], scores:'', confidence:'次选', note:''},
+          m3: {spf:['a','d'], hhad:['a'], goals:[], scores:'0:1/0:2', confidence:'', note:''}
+        };
+        state.combos[today] = [{
+          id: 'c1', name: '烟雾方案', multiple: 5, time: new Date().toISOString(),
+          items: [{
+            matchId:'m1', num:'周日001', home:'主队1', away:'客队1',
+            options:[{market:'spf',pick:'h',label:'胜',odd:1.5}]
+          }]
+        }];
+        saveState();
+        log('native roundRect: ' + (typeof CanvasRenderingContext2D.prototype.roundRect));
+        log('ensureRoundRect typeof: ' + typeof ensureRoundRect);
+        ensureRoundRect();
+        log('after ensure roundRect: ' + (typeof CanvasRenderingContext2D.prototype.roundRect));
+
+        // Scan poster
+        const okScan = drawScanPoster();
+        log('drawScanPoster: ' + okScan + ' canvas=' + posterCanvas.width + 'x' + posterCanvas.height);
+        if (!okScan) throw new Error('scan draw failed');
+        const blob1 = await canvasToBlob();
+        log('scan blob bytes: ' + blob1.size);
+        if (blob1.size < 1000) throw new Error('scan blob too small');
+
+        // Combo poster
+        const okCombo = drawSingleComboPoster(state.combos[today][0]);
+        log('drawSingleComboPoster: ' + okCombo + ' canvas=' + posterCanvas.width + 'x' + posterCanvas.height);
+        if (!okCombo) throw new Error('combo draw failed');
+        const blob2 = await canvasToBlob();
+        log('combo blob bytes: ' + blob2.size);
+        if (blob2.size < 1000) throw new Error('combo blob too small');
+
+        // Preview path
+        showPosterDialog('smoke');
+        await refreshPosterPreview();
+        await new Promise(r => setTimeout(r, 300));
+        log('preview img hidden=' + posterImage.hidden + ' srcKind=' + (posterImage.src.startsWith('blob:')?'blob':posterImage.src.slice(0,32)));
+        log('canvas hidden=' + posterCanvas.hidden);
+        if (posterImage.hidden && posterCanvas.hidden) throw new Error('both preview surfaces hidden');
+
+        // Max edge guard: huge height should clamp
+        const huge = preparePosterCanvas(1200, 20000);
+        log('huge canvas physical: ' + posterCanvas.width + 'x' + posterCanvas.height + ' scale=' + huge.scale);
+        if (posterCanvas.height > 4096) throw new Error('max edge not applied');
+
+        log('PASS');
+        document.title = 'PASS';
+      } catch (e) {
+        log('FAIL: ' + (e && e.stack || e));
+        document.title = 'FAIL';
+      }
+    })();
+  </script>
+</body>
+</html>
