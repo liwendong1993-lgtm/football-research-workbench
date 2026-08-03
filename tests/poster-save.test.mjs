@@ -56,6 +56,17 @@ test('夸克保存避开伪分享并提供 dataURL 长按保存层',()=>{
   assert.match(app,/image\/jpeg/);
   assert.match(app,/posterSaveLayer/);
   assert.match(app,/openPosterSaveLayer\(asset\)/);
-  assert.match(html,/打开长按保存页|准备长按保存/);
+  assert.match(html,/保存到相册|新页面打开图片/);
   assert.match(css,/\.poster-save-layer/);
+});
+
+test('夸克相册保存走 Service Worker 同源 HTTP 图片',()=>{
+  assert.match(app,/publishPosterHttp/);
+  assert.match(app,/ensureAlbumAsset/);
+  assert.match(app,/STORE_POSTER/);
+  assert.match(app,/__poster__/);
+  const sw=fs.readFileSync(new URL('../sw.js',import.meta.url),'utf8');
+  assert.match(sw,/STORE_POSTER/);
+  assert.match(sw,/__poster__/);
+  assert.match(sw,/POSTER_CACHE/);
 });

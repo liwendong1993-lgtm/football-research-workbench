@@ -155,18 +155,22 @@
         log('canvas hidden=' + posterCanvas.hidden);
         if (posterImage.hidden && posterCanvas.hidden) throw new Error('both preview surfaces hidden');
         if (isQuarkLike()) {
-          if (!posterImage.src.startsWith('data:image/jpeg')) throw new Error('quark preview must be jpeg data url, got '+srcKind);
-          const asset = await exportPosterAsset(true);
-          if (asset.mime !== 'image/jpeg' || !asset.dataUrl.startsWith('data:image/jpeg')) throw new Error('quark export not jpeg dataurl');
+          const asset = await ensureAlbumAsset(true);
+          if (asset.mime !== 'image/jpeg') throw new Error('quark export mime '+asset.mime);
           if (asset.bytes > 1800000) throw new Error('quark export too large: '+asset.bytes);
+          // Prefer HTTP via SW; data URL is acceptable fallback in headless without SW activation race.
+          const src = posterImage.src || '';
+          if (!(src.includes('/__poster__/') || src.startsWith('data:image/jpeg') || src.startsWith('blob:'))) {
+            throw new Error('unexpected preview src '+src.slice(0,80));
+          }
           await downloadPoster();
           const layer = document.getElementById('posterSaveLayer');
           if (!layer || layer.hidden) throw new Error('save layer not opened on quark download');
           const layerImg = document.getElementById('posterSaveLayerImage');
-          if (!layerImg || !layerImg.src.startsWith('data:image/jpeg')) throw new Error('save layer image not jpeg dataurl');
+          if (!layerImg || !layerImg.src) throw new Error('save layer image missing');
           const st = document.getElementById('posterSaveStatus').textContent || '';
           if (st.includes('已取消分享')) throw new Error('false cancel share still shown: '+st);
-          log('quark save layer ok bytes=' + asset.bytes);
+          log('quark save layer ok bytes=' + asset.bytes + ' http=' + !!(asset.httpUrl) + ' layerSrc=' + (layerImg.src.includes('/__poster__/')?'http':layerImg.src.slice(0,12)));
         }
 
         // Max edge guard: huge height should clamp

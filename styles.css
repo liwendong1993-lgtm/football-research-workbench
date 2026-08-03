@@ -5,7 +5,7 @@
 .poster-save-layer-panel{width:min(720px,100%);max-height:96vh;overflow:auto;background:#0c1827;border-radius:18px 18px 0 0;padding:14px 14px 28px;color:var(--text)}
 .poster-save-layer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;background:#0c1827;z-index:2;padding-bottom:8px}
 .poster-save-layer-head strong{font-size:16px}
-.poster-save-layer-tip{margin:4px 2px 10px;color:var(--muted);font-size:12px;line-height:1.55}
+.poster-save-layer-tip{margin:4px 2px 10px;color:var(--muted);font-size:12px;line-height:1.55}.poster-save-actions{display:grid;gap:8px;margin-top:10px}.poster-save-actions .primary,.poster-save-actions .secondary{width:100%}
 #posterSaveLayerImage{display:block;width:100%;height:auto;border-radius:12px;background:#fff;-webkit-touch-callout:default;user-select:auto;-webkit-user-select:auto;pointer-events:auto;touch-action:manipulation}
 .poster-image,.poster-save-layer img{-webkit-touch-callout:default!important}
 
