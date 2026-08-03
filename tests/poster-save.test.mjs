@@ -70,3 +70,10 @@ test('夸克相册保存走 Service Worker 同源 HTTP 图片',()=>{
   assert.match(sw,/__poster__/);
   assert.match(sw,/POSTER_CACHE/);
 });
+
+test('保存页用原生链接打开并预填 URL，避免 await 后 window.open 被夸克拦截',()=>{
+  assert.match(app,/posterSaveOpenLink/);
+  assert.match(app,/openUrlInNewContext/);
+  assert.match(app,/posterSaveReady/);
+  assert.match(app,/系统下载\/打开/);
+});

@@ -87,12 +87,12 @@ test('夸克海报预览失败时回退Canvas',()=>{
 });
 
 test('发布缓存版本在应用外壳中保持一致',()=>{
-  const release='20260803-quark-http2';
+  const release='20260803-quark-http3';
   for(const asset of ['styles.css','combo-utils.js','scan-utils.js','review-utils.js','app.js']){
     const escapedAsset=asset.replace('.','\\.');
     assert.match(html,new RegExp(`${escapedAsset}\\?v=${release}`));
     assert.match(sw,new RegExp(`${escapedAsset}\\?v=${release}`));
   }
   assert.match(app,new RegExp(`sw\\.js\\?v=${release}`));
-  assert.match(sw,/football-workbench-v25/);
+  assert.match(sw,/football-workbench-v26/);
 });

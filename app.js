@@ -227,53 +227,75 @@ async function ensureAlbumAsset(preferAlbum=false){
   }
   return asset;
 }
-function ensurePosterSaveLayer(){
-  let layer=$('#posterSaveLayer');
-  if(layer)return layer;
-  layer=document.createElement('div');
-  layer.id='posterSaveLayer';
-  layer.className='poster-save-layer';
-  layer.hidden=true;
-  layer.innerHTML=`<div class="poster-save-layer-panel"><div class="poster-save-layer-head"><strong>保存到相册</strong><button type="button" class="icon-btn" data-close-save-layer aria-label="关闭">×</button></div><p class="poster-save-layer-tip">夸克请按顺序试：① 长按图片选“保存图片”；② “新页面打开后再长按”；③ “系统下载/打开”。使用网页图片链接，避免 blob/data 假保存。</p><img id="posterSaveLayerImage" alt="长按保存海报" referrerpolicy="no-referrer" /><p id="posterSaveLayerStatus" class="poster-save-status" aria-live="polite"></p><div class="poster-save-actions"><button type="button" class="primary full" id="posterSaveOpenTabBtn">新页面打开后再长按</button><button type="button" class="secondary full" id="posterSaveDownloadBtn">系统下载/打开</button><button type="button" class="secondary full" data-close-save-layer>关闭</button></div></div>`;
-  document.body.appendChild(layer);
+let posterSaveReady=null; // {httpUrl,dataUrl,blob,filename,mime,bytes}
+function openUrlInNewContext(url,filename=''){
+  if(!url)return false;
+  // Synchronous anchor click preserves user gesture better than window.open after await (Quark).
+  const a=document.createElement('a');
+  a.href=url;
+  if(filename)a.download=filename;
+  a.target='_blank';
+  a.rel='noopener';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>a.remove(),2000);
+  return true;
+}
+function wirePosterSaveActions(){
+  const layer=$('#posterSaveLayer');
+  if(!layer||layer.dataset.wired==='1')return;
+  layer.dataset.wired='1';
   layer.addEventListener('click',e=>{
     if(e.target===layer||e.target.closest('[data-close-save-layer]'))closePosterSaveLayer();
   });
-  layer.querySelector('#posterSaveOpenTabBtn').onclick=async e=>{
+  // Real link is the most reliable open path on Quark — href prefilled when image ready.
+  const openLink=layer.querySelector('#posterSaveOpenLink');
+  if(openLink){
+    openLink.addEventListener('click',e=>{
+      // If href still placeholder, block and hint.
+      if(!openLink.getAttribute('href')||openLink.getAttribute('href')==='#'){
+        e.preventDefault();
+        const status=$('#posterSaveLayerStatus');
+        if(status){status.textContent='图片还在准备，请稍等一秒再点。';status.className='poster-save-status error'}
+        return;
+      }
+      // Let the browser handle target=_blank natively (no await).
+      const status=$('#posterSaveLayerStatus');
+      if(status){status.textContent='正在打开图片页… 若无反应请改用“系统下载/打开”。';status.className='poster-save-status'}
+    });
+  }
+  layer.querySelector('#posterSaveDownloadBtn').onclick=e=>{
     e.preventDefault();e.stopPropagation();
     const status=$('#posterSaveLayerStatus');
-    try{
-      const asset=await ensureAlbumAsset(true);
-      const url=asset.httpUrl||asset.dataUrl;
-      if(!url)throw new Error('没有可打开的图片');
-      const win=window.open(url,'_blank');
-      if(!win){status.textContent='弹窗被拦截。请再试或直接长按上方图片。';status.className='poster-save-status error';return}
-      status.textContent='已在新页面打开图片，请在新页面长按 → 保存图片。';
-      status.className='poster-save-status success';
-    }catch(error){
-      status.textContent=`打开失败：${error?.message||'请长按上方图片'}`;
-      status.className='poster-save-status error';
+    const ready=posterSaveReady;
+    if(!ready){
+      status.textContent='图片还在准备，请稍等。';status.className='poster-save-status error';
+      return;
     }
-  };
-  layer.querySelector('#posterSaveDownloadBtn').onclick=async e=>{
-    e.preventDefault();e.stopPropagation();
-    const status=$('#posterSaveLayerStatus');
     try{
-      const asset=await ensureAlbumAsset(true);
-      const filename=posterFilenameFor(asset);
-      const href=asset.httpUrl||asset.dataUrl||URL.createObjectURL(asset.blob);
-      const a=document.createElement('a');
-      a.href=href;a.download=filename;a.target='_blank';a.rel='noopener';a.style.display='none';
-      document.body.appendChild(a);a.click();
-      setTimeout(()=>a.remove(),3000);
-      if(asset.httpUrl){setTimeout(()=>{try{window.open(asset.httpUrl,'_blank')}catch(_){}},250)}
-      status.textContent='已触发系统下载/打开。若仍没有，请用“新页面打开后再长按”。';
+      const href=ready.httpUrl||ready.dataUrl;
+      if(!href)throw new Error('没有可下载的图片');
+      // Prefer same-origin HTTP + download attribute — user confirmed this path works on Quark.
+      openUrlInNewContext(href,ready.filename||'poster.jpg');
+      status.textContent='已触发系统下载/打开。可到“下载/文件管理”或相册查看。';
       status.className='poster-save-status success';
     }catch(error){
       status.textContent=`下载失败：${error?.message||'请长按图片'}`;
       status.className='poster-save-status error';
     }
   };
+}
+function ensurePosterSaveLayer(){
+  let layer=$('#posterSaveLayer');
+  if(layer){wirePosterSaveActions();return layer}
+  layer=document.createElement('div');
+  layer.id='posterSaveLayer';
+  layer.className='poster-save-layer';
+  layer.hidden=true;
+  layer.innerHTML=`<div class="poster-save-layer-panel"><div class="poster-save-layer-head"><strong>保存到相册</strong><button type="button" class="icon-btn" data-close-save-layer aria-label="关闭">×</button></div><p class="poster-save-layer-tip">夸克推荐：先点绿色「系统下载/打开」（已验证可用）。若要新页面长按，用蓝色链接（不要等异步弹窗）。</p><img id="posterSaveLayerImage" alt="长按保存海报" referrerpolicy="no-referrer" /><p id="posterSaveLayerStatus" class="poster-save-status" aria-live="polite"></p><div class="poster-save-actions"><button type="button" class="primary full" id="posterSaveDownloadBtn">系统下载/打开</button><a class="secondary full poster-save-open-link" id="posterSaveOpenLink" href="#" target="_blank" rel="noopener">新页面打开图片</a><button type="button" class="secondary full" data-close-save-layer>关闭</button></div></div>`;
+  document.body.appendChild(layer);
+  wirePosterSaveActions();
   return layer;
 }
 function closePosterSaveLayer(){
@@ -282,12 +304,19 @@ function closePosterSaveLayer(){
   layer.hidden=true;
   const img=$('#posterSaveLayerImage');
   if(img)img.removeAttribute('src');
+  const openLink=$('#posterSaveOpenLink');
+  if(openLink){openLink.setAttribute('href','#');openLink.removeAttribute('download')}
+  posterSaveReady=null;
 }
 async function openPosterSaveLayer(asset){
   const layer=ensurePosterSaveLayer();
   const img=$('#posterSaveLayerImage');
   const tip=$('#posterSaveLayerStatus');
+  const openLink=$('#posterSaveOpenLink');
+  const downloadBtn=$('#posterSaveDownloadBtn');
   tip.textContent='正在生成可保存图片…';tip.className='poster-save-status';
+  if(openLink){openLink.setAttribute('href','#');openLink.classList.add('is-disabled')}
+  if(downloadBtn)downloadBtn.disabled=true;
   layer.hidden=false;
   const ready=asset?asset:await ensureAlbumAsset(true);
   if(!ready.httpUrl){
@@ -296,6 +325,22 @@ async function openPosterSaveLayer(asset){
   }
   const src=ready.httpUrl||ready.dataUrl;
   if(!src)throw new Error('图片生成失败');
+  const filename=posterFilenameFor(ready);
+  posterSaveReady={
+    httpUrl:ready.httpUrl||'',
+    dataUrl:ready.dataUrl||'',
+    blob:ready.blob,
+    filename,
+    mime:ready.mime,
+    bytes:ready.bytes||0
+  };
+  // Prefill native <a href> BEFORE user taps — critical for Quark gesture rules.
+  if(openLink){
+    openLink.href=src;
+    if(filename)openLink.setAttribute('download',filename);
+    openLink.classList.remove('is-disabled');
+  }
+  if(downloadBtn)downloadBtn.disabled=false;
   const load=url=>new Promise((resolve,reject)=>{
     let done=false;
     const ok=()=>{if(!done){done=true;resolve()}};
@@ -305,12 +350,15 @@ async function openPosterSaveLayer(asset){
   });
   try{await load(src)}
   catch(err){
-    if(ready.dataUrl&&src!==ready.dataUrl)await load(ready.dataUrl);
-    else throw err;
+    if(ready.dataUrl&&src!==ready.dataUrl){
+      await load(ready.dataUrl);
+      if(openLink)openLink.href=ready.dataUrl;
+      posterSaveReady.dataUrl=ready.dataUrl;
+    }else throw err;
   }
   const kb=Math.max(1,Math.round((ready.bytes||0)/1024));
   const via=ready.httpUrl?'网页图片链接':'内嵌图片';
-  tip.textContent=`图片已就绪（约 ${kb}KB，${via}）。请长按图片保存；不行再点下面按钮。`;
+  tip.textContent=`图片已就绪（约 ${kb}KB，${via}）。夸克请优先点「系统下载/打开」；或点「新页面打开图片」后再长按。`;
   tip.className='poster-save-status success';
   try{img.scrollIntoView({block:'center'})}catch(_){}
 }
@@ -1140,8 +1188,8 @@ async function downloadPoster(){
     if(quark){
       await openPosterSaveLayer(asset);
       status.textContent=asset.httpUrl
-        ?'已打开保存页（网页图片链接）。请长按；不行再点“新页面打开后再长按”。'
-        :'已打开保存页。请长按图片；不行再点下方按钮。';
+        ?'已打开保存页。夸克请优先点绿色「系统下载/打开」（你这边已验证可用）。'
+        :'已打开保存页。请优先点「系统下载/打开」。';
       status.className='poster-save-status success';
       return;
     }
@@ -1166,31 +1214,25 @@ async function downloadPoster(){
 async function openPosterImage(){
   const status=$('#posterSaveStatus');
   const quark=isQuarkLike();
-  status.textContent=quark?'正在打开图片…':'正在打开大图…';
+  status.textContent=quark?'正在打开保存页…':'正在打开大图…';
   status.className='poster-save-status';
   try{
     const asset=await ensureAlbumAsset(true);
     if(quark){
-      if(asset.httpUrl){
-        const win=window.open(asset.httpUrl,'_blank');
-        if(win){
-          status.textContent='已用网页图片链接打开，请在新页面长按 → 保存图片。';
-          status.className='poster-save-status success';
-          return;
-        }
-      }
+      // window.open after await is often ignored on Quark; save layer + native <a>/<download> works.
       await openPosterSaveLayer(asset);
-      status.textContent='请在保存页长按图片；或点“新页面打开后再长按”。';
+      status.textContent='请优先点「系统下载/打开」；或点「新页面打开图片」。';
       status.className='poster-save-status success';
       return;
     }
     if(asset.httpUrl){
-      const win=window.open(asset.httpUrl,'_blank');
-      if(win){
-        status.textContent='已打开大图，请长按图片保存。';
-        status.className='poster-save-status success';
-        return;
-      }
+      // Still try native anchor open first for non-quark.
+      openUrlInNewContext(asset.httpUrl,posterFilenameFor(asset));
+      status.textContent='已尝试打开大图；若无反应请用保存页。';
+      status.className='poster-save-status success';
+      // also show layer as backup
+      await openPosterSaveLayer(asset);
+      return;
     }
     const popup=window.open('about:blank','_blank');
     let dataUrl=asset.dataUrl;
@@ -1236,4 +1278,4 @@ function bind(){
 }
 
 bind();renderAll();fetchMatches(false);
-if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-http2',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=20260803-quark-http3',{updateViaCache:'none'}).then(registration=>registration.update()).catch(console.error);
